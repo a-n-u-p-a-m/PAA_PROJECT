@@ -1,0 +1,10 @@
+# Dutta et al. (EACL 2026) used PyTorch 2.6 / CUDA 12.8 / Transformers 4.51.
+# Transformers >= 4.51 is a hard floor: Qwen3 support lands there.
+torch>=2.1
+transformers>=4.51
+accelerate>=0.26
+datasets>=2.18            # HumanEval, GSM8K, CNN-DM
+nvidia-ml-py>=12.535      # pynvml: NVML energy counter, GPU only
+bitsandbytes>=0.43        # NF4 target quantization, as the paper used
+sentencepiece             # Vicuna / Llama tokenizers
+protobuf
