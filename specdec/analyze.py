@@ -140,7 +140,8 @@ def fmt(value, spec: str, dash: str = "   -  ") -> str:
     return dash if value is None else format(value, spec)
 
 
-def report(records: list[dict], baseline: dict | None, meta: dict) -> None:
+def report(records: list[dict], baseline: dict | None, meta: dict,
+           rows: list[dict] | None = None) -> None:
     pair = meta.get("model_pair") or {}
     print(f"{pair.get('target', '?')}  <-  {pair.get('draft', '?')}")
     print(f"{meta.get('dataset', '?')} on {meta.get('device', '?')}"
@@ -204,47 +205,95 @@ def report(records: list[dict], baseline: dict | None, meta: dict) -> None:
     if not curve:
         return
     print()
-    fastest = max(curve, key=lambda r: r["tokens_per_s"] or 0)
-    print(f"  latency-optimal   K = {fastest['k']}  "
-          f"({fastest['tokens_per_s']:.1f} tok/s)")
-    if have_dyn:
-        with_d = [r for r in curve if r["dynamic_per_token_mj"]]
-        if with_d:
-            lean = min(with_d, key=lambda r: r["dynamic_per_token_mj"])
-            print(f"  energy-optimal    K = {lean['k']}  "
-                  f"({lean['dynamic_per_token_mj']:.2f} mJ/token above idle)"
-                  f"   <- use this one")
-            print(f"  idle draw {idle_w:.1f} W is excluded from 'dyn'; the raw "
-                  f"mJ/token column\n  still carries it, and since draft phases "
-                  f"lengthen with K that\n  static term would otherwise inflate "
-                  f"the apparent cost of large K.")
+    _verdict(curve, rows or [], have_dyn, meta.get('idle_watts'))
 
-    if have_energy:
-        with_e = [r for r in curve if r["energy_per_token_mj"]]
-        greenest = min(with_e, key=lambda r: r["energy_per_token_mj"])
-        if not have_dyn:
-            print(f"  energy-optimal    K = {greenest['k']}  "
-                  f"({greenest['energy_per_token_mj']:.2f} mJ/token)")
-        # compare against the above-idle optimum when we have one: the raw
-        # column carries static power, which rises with K and would shift the
-        # apparent minimum
-        key = "dynamic_per_token_mj" if have_dyn else "energy_per_token_mj"
-        best = min((r for r in curve if r[key]), key=lambda r: r[key], default=None)
-        fast_e = fastest[key]
-        if best and fast_e and best["k"] != fastest["k"]:
-            penalty = (fast_e / best[key] - 1) * 100
-            print(f"\n  The two minima differ. Running at K={fastest['k']} for speed "
-                  f"costs {penalty:.1f}% more\n  energy per token than K="
-                  f"{best['k']} would. That gap is the result.")
-        elif best:
-            print("\n  Both minima land on the same K for this pair and dataset.")
+
+def _paired(rows, a, b, key):
+    """Mean per-prompt (a - b) with a 95% CI.
+
+    Every K is run on the same prompts, so these are paired samples and
+    prompt difficulty cancels. Comparing two independent means instead --
+    or eyeballing whether error bars overlap -- is far less sensitive and
+    will call a real difference a tie.
+    """
+    import statistics as _st
+
+    A = {r["sample_index"]: r for r in rows if r["strategy"] == a}
+    B = {r["sample_index"]: r for r in rows if r["strategy"] == b}
+    ids = sorted(set(A) & set(B))
+    diff = []
+    for i in ids:
+        x, y = key(A[i]), key(B[i])
+        if x is None or y is None:
+            continue
+        diff.append(x - y)
+    if len(diff) < 3:
+        return None
+    m = _st.mean(diff)
+    half = 1.96 * _st.stdev(diff) / len(diff) ** 0.5
+    return m, half, (m - half > 0 or m + half < 0)
+
+
+def _verdict(curve, rows, have_dyn, idle_w=None) -> None:
+    ekey = "dynamic_per_token_mj" if have_dyn else "energy_per_token_mj"
+    fastest = max(curve, key=lambda r: r["tokens_per_s"] or 0)
+    with_e = [r for r in curve if r[ekey]]
+    if not with_e:
+        print(f"  latency-optimal   K = {fastest['k']}  "
+              f"({fastest['tokens_per_s']:.1f} tok/s)")
+        return
+    leanest = min(with_e, key=lambda r: r[ekey])
+
+    def tps(r):
+        return r["tokens_per_s"]
+
+    def ene(r):
+        # must measure the SAME quantity the verdict ranks on, or the paired
+        # delta and the percentage can point in opposite directions -- they
+        # genuinely do when static power and work energy rank K differently
+        m = r.get("meter") or {}
+        e = m.get("energy_mj")
+        if not e or not r.get("new_tokens"):
+            return None
+        total = sum(e.values())
+        if have_dyn and idle_w:
+            total = max(0.0, total - idle_w * sum(m.get("time_ms", {}).values()))
+        return total / r["new_tokens"]
+
+    fast_set = {fastest["k"]}
+    lean_set = {leanest["k"]}
+    for r in curve:
+        s = _paired(rows, f"coga-{fastest['k']}", f"coga-{r['k']}", tps)
+        if s and not s[2]:
+            fast_set.add(r["k"])
+        s = _paired(rows, f"coga-{r['k']}", f"coga-{leanest['k']}", ene)
+        if s and not s[2]:
+            lean_set.add(r["k"])
+
+    print(f"  latency-optimal   K = {fastest['k']}  "
+          f"({fastest['tokens_per_s']:.1f} tok/s)"
+          f"   statistically tied: K={sorted(fast_set)}")
+    print(f"  energy-optimal    K = {leanest['k']}  ({leanest[ekey]:.0f} "
+          f"mJ/token{' above idle' if have_dyn else ''})"
+          f"   statistically tied: K={sorted(lean_set)}")
+
+    ks = [r["k"] for r in curve]
+    if leanest["k"] in (min(ks), max(ks)):
+        print(f"\n  !! the energy minimum sits at K={leanest['k']}, the edge of the\n"
+              f"     swept range. The true optimum may lie beyond it -- extend the\n"
+              f"     sweep past K={max(ks)} before quoting this as K*.")
+
+    both = sorted(fast_set & lean_set)
+    if both:
+        print(f"\n  No trade-off within noise: K={both} is both fastest and\n"
+              f"  lowest-energy. Pick the smallest and stop.")
     else:
-        leanest = min(curve, key=lambda r: r["draft_tokens_per_output_token"] or 1e9)
-        print(f"  least draft work  K = {leanest['k']}  "
-              f"({leanest['draft_tokens_per_output_token']:.2f} draft fwd/token)")
-        print("\n  No energy column: re-run the sweep with --energy, or wait for\n"
-              "  the CLEAR component measurements. Until then 'draft fwd/tok' is\n"
-              "  the best available proxy for where the energy curve will turn up.")
+        s = _paired(rows, f"coga-{fastest['k']}", f"coga-{leanest['k']}", ene)
+        extra = f" ({s[0]:+.0f} +/- {s[1]:.0f} mJ/token, paired)" if s else ""
+        pen = (fastest[ekey] / leanest[ekey] - 1) * 100
+        print(f"\n  A real trade-off: the fastest and lowest-energy K are\n"
+              f"  statistically disjoint. Running at K={fastest['k']} for speed costs\n"
+              f"  {pen:.1f}% more energy per token than K={leanest['k']}{extra}.")
 
 
 def _sanity_check_idle(records, baseline, idle_w) -> None:
@@ -300,7 +349,7 @@ def main() -> None:
     if not rows:
         sys.exit("no rows found")
     records, baseline = aggregate(rows, meta.get('idle_watts'))
-    report(records, baseline, meta)
+    report(records, baseline, meta, rows)
     if args.csv:
         write_csv(records, args.csv)
 
