@@ -1,0 +1,91 @@
+profile kaggle-t4: qwen2.5-3b at nf4, gsm8k
+  The bulk-data machine AND, measured rather than assumed, a valid measurement device: a T4 clears CLEAR's 10% bar at 2.3% rel std dev once the window is sized to its ~100 ms sensor period. The 70 W cap seems to help -- a pinned card does not oscillate. ~30 h/week dwarfs every other budget here. Pass --energy.
+
+Qwen2.5-3B <- Qwen2.5-0.5B: ~3.8 GB estimated, 14.6 GB on device
+loading target Qwen/Qwen2.5-3B-Instruct  (nf4)
+Loading weights:   0%|          | 0/434 [00:00<?, ?it/s]Loading weights:   0%|          | 1/434 [00:00<01:08,  6.35it/s]Loading weights:   1%|          | 5/434 [00:00<00:19, 21.57it/s]Loading weights:   7%|▋         | 29/434 [00:00<00:03, 105.89it/s]Loading weights:  12%|█▏        | 53/434 [00:00<00:02, 150.18it/s]Loading weights:  18%|█▊        | 77/434 [00:00<00:02, 175.61it/s]Loading weights:  23%|██▎       | 101/434 [00:00<00:01, 189.34it/s]Loading weights:  29%|██▉       | 125/434 [00:00<00:01, 200.18it/s]Loading weights:  34%|███▍      | 149/434 [00:00<00:01, 202.00it/s]Loading weights:  40%|███▉      | 172/434 [00:01<00:01, 209.48it/s]Loading weights:  45%|████▌     | 196/434 [00:01<00:01, 212.31it/s]Loading weights:  51%|█████     | 220/434 [00:01<00:00, 215.32it/s]Loading weights:  56%|█████▌    | 244/434 [00:01<00:00, 218.13it/s]Loading weights:  62%|██████▏   | 268/434 [00:01<00:00, 219.29it/s]Loading weights:  67%|██████▋   | 292/434 [00:01<00:00, 220.51it/s]Loading weights:  73%|███████▎  | 316/434 [00:01<00:00, 221.33it/s]Loading weights:  78%|███████▊  | 340/434 [00:01<00:00, 221.86it/s]Loading weights:  84%|████████▍ | 364/434 [00:01<00:00, 222.19it/s]Loading weights:  89%|████████▉ | 388/434 [00:01<00:00, 221.54it/s]Loading weights:  95%|█████████▍| 412/434 [00:02<00:00, 222.06it/s]Loading weights: 100%|██████████| 434/434 [00:02<00:00, 199.02it/s]
+loading draft  Qwen/Qwen2.5-0.5B-Instruct  (float16)
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:   0%|          | 1/290 [00:00<01:05,  4.39it/s]Loading weights:  63%|██████▎   | 183/290 [00:00<00:00, 683.25it/s]Loading weights:  98%|█████████▊| 283/290 [00:00<00:00, 731.81it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 629.66it/s]
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+gsm8k: 256 prompts x 8 strategies on cuda
+
+NVML energy counter attached to physical GPU 0 (whole-phase, coarse)
+idle draw 32.7 W -- recorded so the analysis can report energy above idle, not just energy during the phase
+
+2304 units total, 2304 to run (prompt-major order)
+deadline in 620 min, holding back 3 min to write results
+
+  [57/2304   2.5%]  elapsed 16m  eta 10.5h  deadline in 604m
+  [114/2304   4.9%]  elapsed 29m  eta 7.0h  deadline in 591m
+  [171/2304   7.4%]  elapsed 42m  eta 8.9h  deadline in 578m
+  [228/2304   9.9%]  elapsed 57m  eta 8.9h  deadline in 563m
+  [285/2304  12.4%]  elapsed 72m  eta 8.9h  deadline in 548m
+  [342/2304  14.8%]  elapsed 87m  eta 6.9h  deadline in 533m
+  [399/2304  17.3%]  elapsed 100m  eta 8.0h  deadline in 520m
+  [456/2304  19.8%]  elapsed 115m  eta 6.9h  deadline in 505m
+  [513/2304  22.3%]  elapsed 131m  eta 8.3h  deadline in 489m
+  [570/2304  24.7%]  elapsed 146m  eta 8.0h  deadline in 474m
+  [627/2304  27.2%]  elapsed 162m  eta 8.5h  deadline in 458m
+  [684/2304  29.7%]  elapsed 178m  eta 7.5h  deadline in 442m
+  [741/2304  32.2%]  elapsed 194m  eta 6.6h  deadline in 426m
+  [798/2304  34.6%]  elapsed 210m  eta 7.0h  deadline in 410m
+  [855/2304  37.1%]  elapsed 226m  eta 6.8h  deadline in 394m
+  [912/2304  39.6%]  elapsed 242m  eta 6.9h  deadline in 378m
+  [969/2304  42.1%]  elapsed 257m  eta 6.4h  deadline in 363m
+  [1026/2304  44.5%]  elapsed 274m  eta 6.9h  deadline in 346m
+  [1083/2304  47.0%]  elapsed 289m  eta 5.8h  deadline in 331m
+  [1140/2304  49.5%]  elapsed 304m  eta 5.2h  deadline in 316m
+  [1197/2304  52.0%]  elapsed 319m  eta 5.4h  deadline in 301m
+  [1254/2304  54.4%]  elapsed 335m  eta 4.0h  deadline in 285m
+  [1311/2304  56.9%]  elapsed 350m  eta 4.3h  deadline in 270m
+  [1368/2304  59.4%]  elapsed 362m  eta 2.8h  deadline in 258m
+  [1425/2304  61.8%]  elapsed 377m  eta 3.1h  deadline in 243m
+  [1482/2304  64.3%]  elapsed 390m  eta 2.4h  deadline in 230m
+  [1539/2304  66.8%]  elapsed 404m  eta 3.7h  deadline in 216m
+  [1596/2304  69.3%]  elapsed 420m  eta 3.2h  deadline in 200m
+  [1653/2304  71.7%]  elapsed 436m  eta 3.1h  deadline in 184m
+  [1710/2304  74.2%]  elapsed 451m  eta 2.5h  deadline in 169m
+  [1767/2304  76.7%]  elapsed 466m  eta 2.2h  deadline in 154m
+  [1824/2304  79.2%]  elapsed 481m  eta 2.0h  deadline in 139m
+  [1881/2304  81.6%]  elapsed 497m  eta 2.0h  deadline in 123m
+  [1938/2304  84.1%]  elapsed 512m  eta 1.6h  deadline in 108m
+  [1995/2304  86.6%]  elapsed 527m  eta 87m  deadline in 93m
+  [2052/2304  89.1%]  elapsed 544m  eta 73m  deadline in 76m
+  [2109/2304  91.5%]  elapsed 558m  eta 51m  deadline in 62m
+  [2166/2304  94.0%]  elapsed 573m  eta 33m  deadline in 47m
+  [2223/2304  96.5%]  elapsed 589m  eta 24m  deadline in 31m
+  [2280/2304  99.0%]  elapsed 604m  eta 6m  deadline in 16m
+  [2304/2304  100.0%]  elapsed 609m  eta unknown  deadline in 11m
+peak VRAM actually used: 2.93 GB (estimate was 3.8 GB)
+
+
+wrote /kaggle/working/results/3b-nf4.json  (2304 rows, 2304/2304 units)
+
+  strategy          n   accept  tok/round    tok/s  draft%
+  --------------------------------------------------------
+  autoregressive  256        -       1.00     10.7       -
+  coga-1          256   90.9%       1.90     12.8   26.0%
+  coga-2          256   86.9%       2.73     14.7   41.9%
+  coga-3          256   82.8%       3.46     15.5   51.9%
+  coga-4          256   79.5%       4.15     15.9   59.0%
+  coga-5          256   75.7%       4.74     16.0   64.3%
+  coga-6          256   72.9%       5.32     15.9   68.4%
+  coga-7          256   69.9%       5.83     15.7   71.6%
+  coga-8          256   67.1%       6.30     15.5   74.1%
+
+speedup over autoregressive (x)
+  strategy    gsm8k       
+  coga-1      1.20x       
+  coga-2      1.38x       
+  coga-3      1.45x       
+  coga-4      1.50x       
+  coga-5      1.50x       
+  coga-6      1.50x       
+  coga-7      1.48x       
+  coga-8      1.45x       
+
+Dutta et al. found latency speedup does not imply proportional energy
+savings. These are the latency numbers; the energy curve comes next,
+and the gap between their minima is the result we are after.
+
+  run complete: nothing left.

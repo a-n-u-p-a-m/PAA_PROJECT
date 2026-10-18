@@ -1,0 +1,30 @@
+{
+  "fingerprint": "2be8b7af32f05168",
+  "settings": {
+    "config": "qwen2.5-3b",
+    "quant": "nf4",
+    "draft_precision": "float16",
+    "compute_dtype": "float16",
+    "dataset": "gsm8k",
+    "limit": null,
+    "seed": 42,
+    "max_new_tokens": 256,
+    "sample": false,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "chat_template": true,
+    "strategies": [
+      "coga-1",
+      "coga-2",
+      "coga-3",
+      "coga-4",
+      "coga-5",
+      "coga-6",
+      "coga-7",
+      "coga-8"
+    ],
+    "baseline": true,
+    "repeats": 1
+  },
+  "created": "2026-10-13T07:13:39"
+}
