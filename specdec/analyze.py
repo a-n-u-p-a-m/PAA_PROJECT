@@ -317,12 +317,118 @@ def _sanity_check_idle(records, baseline, idle_w) -> None:
               f"'attached to physical GPU N' line in the run log.\n")
 
 
-def write_csv(records: list[dict], path: str) -> None:
+def load_clear(paths: list[str]) -> dict:
+    """Merge CLEAR files, e.g. a draft+target pass and a target-only pass.
+
+    Only measurements merge; a later file's label overrides an earlier one.
+    Energy from two files is comparable only if both ran on the same device.
+    """
+    merged: dict = {"meta": {"n_layers": {}, "device": set()}, "measurements": {}}
+    for p in paths:
+        with open(p) as fh:
+            blob = json.load(fh)
+        if blob.get("kind") != "clear":
+            sys.exit(f"{p} is not a run_clear.py output")
+        merged["meta"]["n_layers"].update(blob["meta"]["n_layers"])
+        merged["meta"]["device"].add(blob["meta"].get("device"))
+        for m in blob["measurements"]:
+            merged["measurements"][m["label"]] = m
+    if len(merged["meta"]["device"]) > 1:
+        print(f"!! CLEAR files come from different devices "
+              f"{sorted(merged['meta']['device'])}; their energies cannot share a table")
+    merged["meta"]["device"] = ", ".join(sorted(d or "?" for d in merged["meta"]["device"]))
+    merged["measurements"] = list(merged["measurements"].values())
+    return merged
+
+
+def _measured_per_token(group: list[dict], metric: str, idle_w):
+    """The sweep's own whole-phase number, in the same units as CLEAR's."""
+    vals = []
+    for r in group:
+        if metric == "time_ms":
+            v = sum((r.get("meter") or {}).get("time_ms", {}).values())
+        elif metric == "energy_mj":
+            v = _energy(r)
+        else:
+            v = _energy_above_idle(r, idle_w)
+        if v is not None and r.get("new_tokens"):
+            vals.append(v / r["new_tokens"])
+    return mean(vals)
+
+
+def clear_report(rows: list[dict], blob: dict, meta: dict,
+                 metric: str | None = None) -> list[dict]:
+    """E(K) composed from component costs x call counts, beside the sweep's
+    own whole-phase reading of the same quantity.
+
+    The composed total comes from whole-forward measurements; the breakdown
+    is CLEAR's per-component split of it. CLEAR / measured near 1 says the
+    composition accounts for the energy; well below 1 says something real
+    happens outside the measured forward passes.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from specdec.clear import Costs, compose
+
+    costs = Costs(blob, metric)
+    curve = compose(costs, rows)
+    unit = costs.unit
+    by: dict[str, list[dict]] = {}
+    for r in rows:
+        by.setdefault(r["strategy"], []).append(r)
+
+    print(f"\nCLEAR composition ({unit} per emitted token)")
+    if blob["meta"]["device"] != meta.get("device") and costs.metric != "time_ms":
+        print(f"  !! components measured on {blob['meta']['device']}, sweep ran on "
+              f"{meta.get('device')}: the call counts carry over, the CLEAR/measured "
+              f"column does not")
+    head = (f"  {'K':>3}  {'CLEAR':>9}  {'vs AR':>6}  {'draft%':>7}  "
+            f"{'measured':>9}  {'CLEAR/meas':>10}")
+    print(head)
+    print("  " + "-" * (len(head) - 2))
+    ar = next((c for c in curve if c["strategy"] == "autoregressive"), None)
+    for c in curve:
+        b = c["breakdown"]
+        d = sum(v for k, v in b.items() if k.startswith("draft."))
+        meas = _measured_per_token(by[c["strategy"]], costs.metric, meta.get("idle_watts"))
+        c["measured_per_token"] = meas
+        k = "AR" if c["strategy"] == "autoregressive" else (c["k"] or "~")
+        print(f"  {k:>3}  {c['clear_per_token']:>9.3f}  "
+              f"{fmt(c['clear_per_token'] / ar['clear_per_token'] if ar else None, '>6.2f')}  "
+              f"{d / c['clear_per_token'] * 100:>6.1f}%  {fmt(meas, '>9.3f')}  "
+              f"{fmt(c['clear_per_token'] / meas if meas else None, '>10.2f')}")
+
+    ks = [c for c in curve if c["k"] is not None]
+    if ks:
+        best = min(ks, key=lambda c: c["clear_per_token"])
+        print(f"\n  CLEAR energy-optimal K = {best['k']}")
+
+    parts = sorted({k for c in curve for k in c["breakdown"]},
+                   key=lambda k: (k.split(".")[0] != "draft", k))
+    print(f"\n  per-component split ({unit}/token)")
+    print("  " + f"{'':<22}" + "".join(
+        f"{'AR' if c['strategy'] == 'autoregressive' else 'K=' + str(c['k']):>9}"
+        for c in curve))
+    for p in parts:
+        print("  " + f"{p:<22}" + "".join(
+            f"{c['breakdown'].get(p, 0.0):>9.3f}" for c in curve))
+    if costs.approximated:
+        print("\n  !! no measurement at these row counts; nearest used:")
+        for tag, n in sorted(costs.approximated.items()):
+            print(f"     {tag}  ({n} calls)")
+    return curve
+
+
+def write_csv(records: list[dict], path: str, curve: list[dict] | None = None) -> None:
+    if curve:
+        by = {c["strategy"]: c for c in curve}
+        for r in records:
+            c = by.get(r["strategy"])
+            r["clear_per_token"] = c["clear_per_token"] if c else None
     fields = ["strategy", "k", "constant_k", "mean_draft_length", "acceptance_rate",
               "tokens_per_round", "tokens_per_s", "draft_share",
               "draft_tokens_per_output_token", "energy_mj",
               "energy_per_token_mj", "dynamic_mj", "dynamic_per_token_mj",
-              "n_prompts"]
+              "n_prompts"] + (["clear_per_token"] if curve else [])
     with open(path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
@@ -336,6 +442,12 @@ def main() -> None:
     )
     ap.add_argument("results", nargs="+", help="JSON file(s) from run_baseline.py")
     ap.add_argument("--csv", help="also write the aggregated curve as CSV")
+    ap.add_argument("--clear", nargs="+", metavar="JSON",
+                    help="run_clear.py output(s): compose E(K) from component "
+                         "costs and this sweep's call counts")
+    ap.add_argument("--clear-metric", choices=["energy_mj", "dynamic_mj", "time_ms"],
+                    help="what --clear composes: total energy (default), energy "
+                         "above idle, or time")
     args = ap.parse_args()
 
     paths: list[str] = []
@@ -350,8 +462,10 @@ def main() -> None:
         sys.exit("no rows found")
     records, baseline = aggregate(rows, meta.get('idle_watts'))
     report(records, baseline, meta, rows)
+    curve = (clear_report(rows, load_clear(args.clear), meta, args.clear_metric)
+             if args.clear else None)
     if args.csv:
-        write_csv(records, args.csv)
+        write_csv(records, args.csv, curve)
 
 
 if __name__ == "__main__":

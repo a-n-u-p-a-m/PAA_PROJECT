@@ -12,11 +12,14 @@ specdec/
   datasets.py    HumanEval / GSM8K / CNN-DM at the paper's sample counts
   kv.py          cache length + rollback, isolating HF cache-API churn
   engine.py      draft -> verify -> accept/reject -> rollback; greedy + sampling
-  meters.py      per-phase timing and NVML energy (hook point for CLEAR)
+  meters.py      per-phase timing and NVML energy (coarse, whole-phase)
+  clear.py       CLEAR: capture, frozen-cache replay, amplify, compose
 probe_env.py     can this machine measure energy, and which pairs fit?
 run_baseline.py  the K sweep
-analyze.py       sweep JSON -> energy-vs-K curve, and the two optima
+run_clear.py     component-level energy of both models
+analyze.py       sweep JSON -> energy-vs-K curve, and the two optima (--clear composes CLEAR's)
 tests/test_lossless.py   correctness gate
+tests/test_clear.py      CLEAR replay / call-count gate
 ```
 
 **Running the baseline only, right now? → [BASELINE.md](BASELINE.md).** This
@@ -200,14 +203,26 @@ computed from a continuation just discarded. The draft cache holds only
 
 ## Where CLEAR attaches
 
-`PhaseMeter.phase("draft")` / `.phase("verify")` in `engine.py` are the seams.
-Phase 3 replaces the NVML whole-phase read with CLEAR's three-stage pipeline:
-hook the component boundaries, cache activations, re-execute each component
-N≈10³–10⁴ times on those cached activations, and divide. The whole-phase NVML
-read in `meters.py` is deliberately coarse and labelled as such: a draft phase
-lasting tens of microseconds sits below the NVML sensor's millisecond cadence,
-which is exactly the mismatch CLEAR's amplification exists to defeat. Once
-those numbers exist, `analyze.py` already has the column for them.
+**Running it? → [CLEAR.md](CLEAR.md).**
+
+`specdec/clear.py` hooks each component of both models (embedding, rotary,
+the two norms, attention, MLP, final norm, lm_head, plus whole layers and
+whole forward passes), saves the inputs they see during real decoding, and
+re-executes each one N≈10³–10⁴ times on those inputs, with N sized to the
+energy counter's update period, then divides. The whole-phase NVML read in
+`meters.py` stays as the coarse cross-check: a draft phase lasting tens of
+microseconds sits below the sensor's cadence, which is exactly the mismatch
+amplification exists to defeat.
+
+Both models are profiled, because their shapes differ: a draft call feeds 1
+row (2 after a fully accepted round) and runs K times a round; verify feeds
+K+1 rows once. Attention is also keyed by context length. Replay uses a
+frozen one-layer cache that does the real concatenation and keeps none of it,
+because replaying attention against a live cache grows it on every repeat.
+
+`analyze.py SWEEP --clear CLEAR.json` composes E(K) = Σ cost(call) over the
+calls rebuilt from the sweep's `round_detail`, and compares that against the
+sweep's own measured energy.
 
 
 # Four machines, and what each is for
