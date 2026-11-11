@@ -28,11 +28,19 @@ import argparse
 import json
 import os
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-import torch
+# cuBLAS picks a kernel partly from how much workspace it may use, and caches
+# the pick for the life of the process. Fixing the workspace makes that choice
+# reproducible from one run to the next, so a bad pick becomes a stable fact
+# the anchor check can catch instead of a lottery between processes. This has
+# to be set before torch initialises CUDA, hence its place here.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+import torch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -119,6 +127,14 @@ def parse_args() -> argparse.Namespace:
     g.add_argument("--no-energy", action="store_true", help="timing only")
     g.add_argument("--allow-mismatch", action="store_true",
                    help="measure even if some replays did not reproduce their output")
+    g.add_argument("--no-anchor", action="store_true",
+                   help="skip stage 1b. Without it nothing checks that a replay "
+                        "runs the kernel the real forward pass runs, which is how "
+                        "the first fp16 pass over-attributed the target MLP 4x")
+    g.add_argument("--in-pass-prompts", type=int, default=1,
+                   help="prompts to time components in place on (default 1)")
+    g.add_argument("--in-pass-spans", type=int, default=24,
+                   help="timed calls kept per measurement key (default 24)")
 
     g = ap.add_argument_group("output")
     g.add_argument("--out", default=None)
@@ -130,6 +146,12 @@ def parse_args() -> argparse.Namespace:
     g.add_argument("--gate-max-w", type=float, default=None, metavar="W",
                    help="the gate also fails any measurement above this power, "
                         "e.g. 75 on a 70 W T4")
+    g.add_argument("--repeat", type=int, default=1, metavar="N",
+                   help="measure N times over, each in a fresh process, and record "
+                        "how far each component moves between them. A repeat inside "
+                        "one process cannot see this: the kernel pick is made once "
+                        "per process and then cached. Cheap with --quick, as a "
+                        "pre-flight before spending a slot on the full pass")
     g.add_argument("--check", metavar="JSON",
                    help="gate an existing output file and exit; loads no model")
     g.add_argument("--deadline", metavar="SPEC",
@@ -169,6 +191,63 @@ def run_gate(blob: dict, name, roles=None, max_power_w=None) -> bool:
         return False
     print("\n  gate passed" + (" (with warnings)" if g["warnings"] else ""))
     return True
+
+
+def spread_across(blobs: list[dict]) -> dict:
+    """Per measurement, how far its per-call time moved between passes.
+
+    Reported as a percentage of the smallest reading, which is the one most
+    likely to be the component's real cost: a bad kernel pick only ever
+    makes a call slower than it needs to be.
+    """
+    by: dict[str, list[float]] = {}
+    for b in blobs:
+        for m in b.get("measurements", []):
+            if m.get("time_ms"):
+                by.setdefault(m["label"], []).append(m["time_ms"])
+    seen = {lab: v for lab, v in by.items() if len(v) > 1 and min(v) > 0}
+    return {"passes": len(blobs),
+            "by_label": {lab: (max(v) - min(v)) / min(v) * 100
+                         for lab, v in seen.items()},
+            # so the gate can ignore calls too short for a percentage to mean
+            # anything
+            "min_ms": {lab: min(v) for lab, v in seen.items()}}
+
+
+def repeat_in_fresh_processes(n: int, out: Path) -> list[Path]:
+    """Run this same command again, n-1 times, each in its own process.
+
+    The point is the process boundary, so this re-execs rather than looping:
+    cuBLAS chooses a kernel once per process and caches it, so re-measuring
+    inside this one would return the same number however many times it ran.
+    """
+    flags = {"--gate", "--resume"}                 # take no value
+    valued = {"--repeat", "--out"}                 # take one
+    argv: list[str] = []
+    skip = False
+    for a in sys.argv[1:]:
+        if skip:
+            skip = False
+            continue
+        head = a.split("=", 1)[0]
+        if head in flags:
+            continue
+        if head in valued:
+            skip = "=" not in a
+            continue
+        argv.append(a)
+
+    done: list[Path] = []
+    for i in range(2, n + 1):
+        p = out.with_name(f"{out.stem}-pass{i}{out.suffix}")
+        print(f"\n--- repeat {i}/{n}, fresh process -> {p}", flush=True)
+        rc = subprocess.run([sys.executable, str(Path(__file__).resolve()),
+                             *argv, "--out", str(p)]).returncode
+        if rc == 0:
+            done.append(p)
+        else:
+            print(f"  repeat {i} exited {rc}; leaving it out of the spread")
+    return done
 
 
 def sensor_period(probe: EnergyProbe):
@@ -241,6 +320,33 @@ def main() -> None:
               f"-> {len(store.buckets)} keys, {time.perf_counter() - t0:.0f} s", flush=True)
     store.detach()
 
+    # ---- 1b. what each component costs where it really runs ----------------
+    # The replay check proves a replayed call returns the same values. It
+    # cannot prove it does the same work: cuBLAS may pick a different kernel
+    # for a tight loop of one component than for that component inside a
+    # forward pass, and the pick is cached, so the wrong one reads precise
+    # and steady. These timings are what gate() checks every amplified
+    # number against.
+    in_pass: dict[str, dict] = {}
+    if not args.no_anchor:
+        timer = clear.InPassTimer(kv_bin=args.kv_bin, max_spans=args.in_pass_spans,
+                                  cuda=args.device.startswith("cuda"))
+        timer.attach(draft, "draft", layers["draft"])
+        timer.attach(target, "target", layers["target"])
+        n_pass = max(1, min(args.in_pass_prompts, len(samples)))
+        print(f"\n1b. in-pass timing: {n_pass} prompt(s) at K={args.k}, every "
+              f"component timed by events where it actually runs")
+        t0 = time.perf_counter()
+        with timer:
+            for s in samples[:n_pass]:
+                ids = encode(tok, s.prompt, args.device, not args.no_chat_template)
+                for k in args.k:
+                    speculative_generate(draft, target, ids, k=k, **gen)
+                if not args.no_ar:
+                    autoregressive_generate(target, ids, **gen)
+        in_pass = timer.results()
+        print(f"  {len(in_pass)} keys timed in place, {time.perf_counter() - t0:.0f} s")
+
     # ---- 2. replay check ---------------------------------------------------
     print("\n2. replay check")
     report = clear.check_replay(store, args.device)
@@ -259,6 +365,10 @@ def main() -> None:
         "config", "quant", "draft_precision", "compute_dtype", "dataset", "limit",
         "seed", "max_new_tokens", "k", "layers", "kv_bin", "per_key", "trials",
         "window_factor", "min_window_ms", "settle_ms", "flush_l2", "synthetic")}
+    # Bumped whenever the measurement procedure changes, so --resume refuses
+    # to mix numbers made two different ways in one file. Rev 2: empty_cache
+    # before each pilot, and a second pilot after the settle window.
+    settings["method_rev"] = 2
     blob = {
         "kind": "clear",
         "meta": {
@@ -271,6 +381,12 @@ def main() -> None:
             # in from what was actually measured.
             "precision": {"draft": args.draft_precision, "target": args.quant},
             "roles": [],
+            # how many keys stage 1b managed to time in place; 0 means the
+            # anchor check cannot run on this file. Only CUDA-event timings
+            # are sharp enough for the gate to fail a run on, so it checks
+            # in_pass_events before treating a miss as a problem.
+            "in_pass_timed": len(in_pass),
+            "in_pass_events": bool(in_pass) and args.device.startswith("cuda"),
             "torch": torch.__version__,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         },
@@ -350,7 +466,9 @@ def main() -> None:
             "layer": key.layer, "rows": key.rows, "kv_bin": key.kv_bin,
             "kv_mean": statistics.mean(kvs) if key.kv_bin is not None else None,
             "rows_mean": statistics.mean(c.rows for c in caps),
-            "n_inputs": len(caps), **m,
+            # in_pass_ms / in_pass_n, when stage 1b ran: this key's cost
+            # measured inside a real forward pass, for gate()'s anchor check.
+            "n_inputs": len(caps), **m, **in_pass.get(key.label, {}),
         })
         if key.role not in blob["meta"]["roles"]:
             blob["meta"]["roles"] = sorted(blob["meta"]["roles"] + [key.role])
@@ -363,8 +481,12 @@ def main() -> None:
                     f"{m['power_w']:>5.1f} W  meter {m['meter_overhead_pct']:+5.1f}%")
         else:
             cost = f"{m['time_ms']:>10.4f} ms/call"
+        ip = (in_pass.get(key.label) or {}).get("in_pass_ms")
+        anchor = "" if not ip else (
+            f"  anchor {m['time_ms'] / ip:4.2f}x"
+            + ("" if 0.8 <= m["time_ms"] / ip <= 1.2 else " !!"))
         print(f"  [{i + 1:>4}/{len(keys)}] {key.label:<34} {cost}  "
-              f"N={m['calls_per_trial']:<6} rsd {spread:<6}"
+              f"N={m['calls_per_trial']:<6} rsd {spread:<6}{anchor}"
               f"{'' if m['ok'] else '  !! ' + m['why']}", flush=True)
         if args.device.startswith("cuda") and i % 20 == 19:
             torch.cuda.empty_cache()
@@ -412,6 +534,22 @@ def main() -> None:
         print(f"next:  python analyze.py <sweep.json> --clear <other-role.json> {out}")
     else:
         print(f"\nnext:  python analyze.py <sweep.json> --clear {out}")
+    # ---- 4. the same measurement again, in fresh processes ------------------
+    if args.repeat > 1:
+        extra = repeat_in_fresh_processes(args.repeat, out)
+        if extra:
+            blob["repeat_spread"] = spread_across(
+                [blob] + [json.loads(p.read_text()) for p in extra])
+            write(out, blob)
+            by_label = blob["repeat_spread"]["by_label"]
+            if by_label:
+                print(f"\nbetween-process spread over "
+                      f"{blob['repeat_spread']['passes']} passes, widest first "
+                      f"(a component's cost should not depend on the process "
+                      f"that measured it):")
+                for lab, pct in sorted(by_label.items(), key=lambda kv: -kv[1])[:8]:
+                    print(f"  {lab:<34} {pct:>7.1f}%")
+
     if args.gate and not run_gate(blob, out, roles=args.roles,
                                   max_power_w=args.gate_max_w):
         sys.exit(3)

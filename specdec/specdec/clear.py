@@ -277,6 +277,30 @@ class Key:
         return "/".join(parts)
 
 
+def measurement_key(role: str, comp: str, idx: Optional[int], args: tuple,
+                    kwargs: dict, kv_bin: int) -> tuple[Key, int, Optional[int]]:
+    """Which measurement one call belongs to, with its context and logits rows.
+
+    ``ActivationStore`` (which captures the inputs) and ``InPassTimer``
+    (which times the same calls where they really run) must agree on this
+    exactly: a disagreement would check an amplified measurement against a
+    different shape, which is worse than not checking it. So both call this.
+    """
+    cache = _find_cache(args, kwargs)
+    rows = _rows(args, kwargs)
+    if comp == "forward":
+        kv = cache_length(cache)
+        lm = kwargs.get("logits_to_keep") or kwargs.get("num_logits_to_keep")
+        lm_rows = int(lm) if lm else rows
+        if kv == 0:
+            return Key(role, "prefill", None, None, None), kv, lm_rows
+        return Key(role, comp, None, rows, kv // kv_bin), kv, lm_rows
+    p = layer_kv(cache, idx) if comp in ("attn", "layer") else None
+    kv = 0 if p is None else int(p[0].shape[-2])
+    return (Key(role, comp, idx, rows,
+                kv // kv_bin if comp in KV_DEPENDENT else None), kv, None)
+
+
 class ActivationStore:
     """Hooks two models and keeps a bounded, representative set of inputs.
 
@@ -348,17 +372,14 @@ class ActivationStore:
             slot: Optional[Capture] = None
             pending = self._pending.setdefault(id(module), [])
             cache = _find_cache(args, kwargs)
+            rows = _rows(args, kwargs)
+            key, kv, lm_rows = measurement_key(role, comp, idx, args, kwargs,
+                                               self.kv_bin)
 
             if comp == "forward":
-                kv = cache_length(cache)
                 self._in_prefill[role] = kv == 0
-                rows = _rows(args, kwargs)
-                lm = kwargs.get("logits_to_keep") or kwargs.get("num_logits_to_keep")
-                lm_rows = int(lm) if lm else rows
                 if self.log_calls:
                     self.calls.append((role, rows, kv, lm_rows))
-                key = (Key(role, "prefill", None, None, None) if kv == 0
-                       else Key(role, comp, None, rows, kv // self.kv_bin))
                 pos = self._admit(key)
                 if pos is not None:
                     n = self.n_layers[role]
@@ -368,13 +389,9 @@ class ActivationStore:
                                    _detach(args), _detach(kwargs), state)
                     self.buckets[key][pos] = slot
             elif not self._in_prefill.get(role, False):
-                rows = _rows(args, kwargs)
-                p = layer_kv(cache, idx) if comp in ("attn", "layer") else None
-                kv = 0 if p is None else int(p[0].shape[-2])
-                key = Key(role, comp, idx, rows,
-                          kv // self.kv_bin if comp in KV_DEPENDENT else None)
                 pos = self._admit(key)
                 if pos is not None:
+                    p = layer_kv(cache, idx) if comp in ("attn", "layer") else None
                     state = None if p is None else (_detach(p[0]), _detach(p[1]))
                     slot = Capture(role, comp, idx, rows, kv, None,
                                    _detach(args), _detach(kwargs), state)
@@ -396,6 +413,121 @@ class ActivationStore:
 
     def items(self) -> list[tuple[Key, list[Capture]]]:
         return [(k, [c for c in v if c is not None]) for k, v in self.buckets.items()]
+
+
+# --------------------------------------------------------------------------
+# stage 1b: what each component costs where it really runs
+# --------------------------------------------------------------------------
+
+
+class InPassTimer:
+    """Times every component in place, during a normal decode.
+
+    Amplification replays one component in a tight loop, and the kernel
+    cuBLAS picks for that loop is not always the one the real forward pass
+    uses: selection depends on workspace and allocator state, and the pick
+    is cached for the life of the process. A bad pick is therefore *stable*
+    -- it survives the settle window, reads a steady rel std, and keeps
+    power plausible, because time and energy inflate together.
+
+    None of CLEAR's published gates sees that. The noise bar cannot (the
+    measurement is precise, just not of the right work), %Capture only
+    catches it for a component nested inside another measured one, and the
+    part-vs-whole check cannot fire at all for a top-level part such as
+    ``lm_head``, whose cost stays far below the whole forward pass.
+
+    So this records the ground truth: each component's cost measured by
+    hooks while the whole model runs, with CUDA events and no
+    synchronisation inside the loop. ``gate()`` then compares every
+    amplified measurement against it -- see ``anchor_ratio``.
+
+    Keys match ``ActivationStore``'s exactly, because both come from
+    ``measurement_key``, so each measurement is checked against its own
+    shape and context bin rather than a pooled average.
+    """
+
+    def __init__(self, kv_bin: int = 128, max_spans: int = 24, cuda: bool = True):
+        self.kv_bin = kv_bin
+        self.max_spans = max_spans
+        self.cuda = bool(cuda)
+        self.spans: dict[str, list] = {}
+        self.n_layers: dict[str, int] = {}
+        self.modules: dict[tuple[str, str, Optional[int]], torch.nn.Module] = {}
+        self._handles: list = []
+        self._pending: dict[int, list] = {}
+        self._in_prefill: dict[str, bool] = {}
+
+    def _mark(self):
+        if self.cuda:
+            ev = torch.cuda.Event(enable_timing=True)
+            ev.record()
+            return ev
+        return time.perf_counter()
+
+    def attach(self, model: torch.nn.Module, role: str, layers: Iterable[int]) -> None:
+        self.n_layers[role] = model.config.num_hidden_layers
+        for (comp, idx), mod in components(model, layers).items():
+            self.modules[(role, comp, idx)] = mod
+            self._handles.append(mod.register_forward_pre_hook(
+                self._pre(role, comp, idx), with_kwargs=True))
+            self._handles.append(mod.register_forward_hook(
+                self._post(role, comp), with_kwargs=True))
+
+    def detach(self) -> None:
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.detach()
+
+    def _pre(self, role: str, comp: str, idx: Optional[int]):
+        def hook(module, args, kwargs):
+            pending = self._pending.setdefault(id(module), [])
+            key, kv, _ = measurement_key(role, comp, idx, args, kwargs, self.kv_bin)
+            if comp == "forward":
+                self._in_prefill[role] = kv == 0
+            elif self._in_prefill.get(role, False):
+                pending.append(None)      # components are not measured in prefill
+                return
+            bucket = self.spans.setdefault(key.label, [])
+            if len(bucket) >= self.max_spans:
+                pending.append(None)
+                return
+            pending.append((bucket, self._mark()))
+        return hook
+
+    def _post(self, role: str, comp: str):
+        def hook(module, args, kwargs, output):
+            pending = self._pending.get(id(module))
+            item = pending.pop() if pending else None
+            if item is not None:
+                bucket, start = item
+                bucket.append((start, self._mark()))
+            if comp == "forward":
+                self._in_prefill[role] = False
+        return hook
+
+    def results(self) -> dict[str, dict]:
+        """``{label: {"in_pass_ms": median, "in_pass_n": spans}}``."""
+        if self.cuda:
+            torch.cuda.synchronize()
+        out: dict[str, dict] = {}
+        for label, spans in self.spans.items():
+            ms = []
+            for start, end in spans:
+                try:
+                    ms.append(start.elapsed_time(end) if self.cuda
+                              else (end - start) * 1000)
+                except Exception:
+                    continue      # an event that never ran has no elapsed time
+            if ms:
+                out[label] = {"in_pass_ms": statistics.median(ms),
+                              "in_pass_n": len(ms)}
+        return out
 
 
 # --------------------------------------------------------------------------
@@ -500,6 +632,14 @@ class AmplifyConfig:
     warmup: int = 3
     max_calls: int = 200_000
     tick_timeout_s: float = 5.0
+    empty_cache: bool = True        # same free workspace for every component,
+                                    # so cuBLAS makes the same choice for all
+    # Amplified / in-pass time. Not centred on 1: a part replayed on its own
+    # pays launch and sync costs that overlap with other work in the real
+    # pass, so somewhat above 1 is honest (a sound T4 lm_head read 1.33x).
+    # Below 1 is honest too, since an in-pass span carries the hook's own
+    # overhead. The failures this exists to catch were 4.2x and 4.4x.
+    anchor_band: tuple = (0.7, 1.4)
 
 
 def _sync(device) -> None:
@@ -604,21 +744,31 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
                 overhead()
             fns[i % m]()
 
+    def pilot() -> float:
+        """ms per call with nothing watching, growing the batch until the
+        total is long enough to time."""
+        n = len(fns)
+        while True:
+            t0 = time.perf_counter()
+            body(n)
+            _sync(device)
+            dt = (time.perf_counter() - t0) * 1000
+            if dt >= 100 or n >= cfg.max_calls:
+                return dt / n
+            n *= 4
+
+    # Which kernel cuBLAS picks depends on how much workspace is free, so
+    # hand every component the same allocator state. Otherwise the pick
+    # drifts as the run fragments memory and a component measured late is
+    # not comparable with one measured early.
+    if cfg.empty_cache and str(device).startswith("cuda"):
+        torch.cuda.empty_cache()
+
     for _ in range(cfg.warmup):
         body(len(fns))
     _sync(device)
-
-    # unmetered timing pass: how long is one call with nothing watching?
-    n_probe = len(fns)
-    while True:
-        t0 = time.perf_counter()
-        body(n_probe)
-        _sync(device)
-        dt = (time.perf_counter() - t0) * 1000
-        if dt >= 100 or n_probe >= cfg.max_calls:
-            per_call_ms = dt / n_probe
-            break
-        n_probe *= 4
+    per_call_ms = first_pilot = pilot()
+    settled_pilot = None
 
     if not energy:
         return _timing_only(body, per_call_ms, len(fns), device, cfg)
@@ -633,6 +783,15 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
         body(chunk, done)
         _sync(device)
         done += chunk
+
+    # Time it again now it has been running for settle_ms. A pick that was
+    # slow only because the first calls paid to set it up reads faster here;
+    # one that is genuinely wrong does not move, which is the signal the
+    # anchor check needs. Keep the better of the two.
+    settled_pilot = pilot()
+    if settled_pilot < per_call_ms:
+        per_call_ms = settled_pilot
+        chunk = max(1, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
 
     poller = _TickPoller(probe, cfg.poll_ms / 1000)
     poller.start()
@@ -667,6 +826,9 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
 
     res = _summarise(rows, idle_w, period_ms)
     res["time_ms_unmetered"] = per_call_ms
+    # Both pilots, so a reading that never improved can be told apart from
+    # one that only needed warming up.
+    res["pilot_ms"] = {"first": first_pilot, "settled": settled_pilot}
     res["meter_overhead_pct"] = (res["time_ms"] / per_call_ms - 1) * 100
     res["nvml_read_ms"] = poller.read_s / max(poller.reads, 1) * 1000
     if overhead is not None:
@@ -1077,17 +1239,26 @@ def additivity(costs: Costs) -> list[dict]:
 def gate(blob: dict, roles: Optional[Iterable[str]] = None,
          max_power_w: Optional[float] = None,
          forward_range: tuple[float, float] = (0.8, 1.25),
-         layer_range: tuple[float, float] = (0.8, 1.25)) -> dict:
+         layer_range: tuple[float, float] = (0.8, 1.25),
+         anchor_band: tuple[float, float] = (0.7, 1.4),
+         anchor_floor_ms: float = 0.2,
+         max_spread_pct: float = 25.0,
+         spread_floor_ms: float = 0.05) -> dict:
     """Is this ``run_clear.py`` output fit to compose from?
 
     Returns ``{"lines", "problems", "warnings"}``. A problem means the
     numbers must not be used; a warning means a figure that does not enter
     the composed total looks off and needs explaining before it is quoted.
 
-    Beyond noise and additivity, two checks look for a replay that is not
-    doing the work the real pass did, using time, which needs no counter:
+    Beyond noise and additivity, four checks look for a replay that is not
+    doing the work the real pass did. Three need only time, no counter:
     a part replayed alone must not take longer than the whole that contains
-    it, and fewer rows should not take much longer than more rows.
+    it; fewer rows should not take much longer than more rows; and every
+    component's amplified cost must match what it costs measured in place
+    by ``InPassTimer`` (``anchor_band``) -- the one check that catches a
+    kernel pick that is wrong but stable, which the others cannot see. The
+    fourth, if ``--repeat`` was used, is whether a component costs the same
+    in a fresh process (``max_spread_pct``).
     """
     ms = blob["measurements"]
     problems: list[str] = []
@@ -1162,6 +1333,81 @@ def gate(blob: dict, roles: Optional[Iterable[str]] = None,
         warnings.append("fewer rows cost more than more rows: " + "; ".join(backwards[:4])
                         + (f" (+{len(backwards) - 4} more)" if len(backwards) > 4 else ""))
     lines.append(f"part slower than whole: {len(slow)}")
+
+    # ---- the anchor: is the replay doing the work the pass did?
+    # The only check that catches a stable-but-wrong kernel pick. The noise
+    # bar cannot (such a measurement is precise), power cannot (time and
+    # energy inflate together, so W stays plausible), and part-vs-whole
+    # cannot reach a top-level part like lm_head, which stays far below the
+    # whole forward pass however inflated it is. Time only, no counter.
+    lo_a, hi_a = anchor_band
+    anchored = [m for m in ms if m.get("in_pass_ms") and m.get("time_ms")]
+    if anchored:
+        ratios = [m["time_ms"] / m["in_pass_ms"] for m in anchored]
+        say = lambda m: (f"{m.get('label', m['component'])} "
+                         f"{m['time_ms'] / m['in_pass_ms']:.2f}x "
+                         f"({m['time_ms']:.3f} ms amplified vs "
+                         f"{m['in_pass_ms']:.3f} ms in the pass)")
+        bad = [m for m in anchored
+               if not lo_a <= m["time_ms"] / m["in_pass_ms"] <= hi_a]
+        # An in-pass span is bracketed on the stream, so for a component
+        # small enough to be launch-bound it also covers the gaps where the
+        # GPU waits for the CPU. That reads as the replay being faster than
+        # the pass, which is an artefact, not a finding. Below the floor,
+        # say so rather than fail: nothing that small moves a composed total.
+        #
+        # The floor is on the amplified time, not the in-pass time: an
+        # inflated in-pass reading is exactly what this is protecting
+        # against, so letting it clear its own floor would exempt the cases
+        # worth catching.
+        off = [say(m) for m in bad if m["time_ms"] >= anchor_floor_ms]
+        small = [say(m) for m in bad if m["time_ms"] < anchor_floor_ms]
+        lines.append(f"anchor vs in-pass:      {min(ratios):.2f} .. {max(ratios):.2f}"
+                     f"  ({len(anchored)}/{len(ms)} anchored, {len(off)} off)")
+        if small:
+            warnings.append(
+                f"{len(small)} component(s) under {anchor_floor_ms} ms are outside "
+                "the anchor band, where an in-pass span is mostly launch gaps: "
+                + "; ".join(small[:3]))
+        if off and not blob.get("meta", {}).get("in_pass_events"):
+            # Without CUDA events an in-pass span is bounded by perf_counter
+            # around a hook, which charges Python dispatch to the component
+            # and swamps anything this small. Report it, do not judge on it.
+            warnings.append(
+                f"{len(off)} measurements are outside the anchor band, but this "
+                "file's in-pass times were not taken with CUDA events, so they "
+                "are too coarse to fail a run on: " + "; ".join(off[:2]))
+        elif off:
+            problems.append(
+                "amplified cost does not match what the component costs inside "
+                f"the real pass (outside {lo_a} .. {hi_a}), so the replay is not "
+                "running the kernel the pass runs: " + "; ".join(off[:4])
+                + (f" (+{len(off) - 4} more)" if len(off) > 4 else ""))
+    else:
+        warnings.append("no in-pass timings in this file, so the kernel-choice "
+                        "check did not run: re-measure with InPassTimer attached "
+                        "before quoting a component split")
+
+    # ---- repeatability across processes, if --repeat was used
+    rep = blob.get("repeat_spread") or {}
+    by_label = rep.get("by_label") or {}
+    if by_label:
+        ranked = sorted(by_label.items(), key=lambda kv: -kv[1])
+        lines.append(f"between-process spread: {ranked[-1][1]:.1f}% .. "
+                     f"{ranked[0][1]:.1f}%  over {rep.get('passes', '?')} processes")
+        # A call of a few microseconds swings wildly for reasons that have
+        # nothing to do with kernel choice, and no composed total leans on
+        # one. Judge only components big enough to matter.
+        floor = rep.get("min_ms") or {}
+        drifted = [f"{lab} {v:.0f}%" for lab, v in ranked
+                   if v > max_spread_pct
+                   and floor.get(lab, float("inf")) >= spread_floor_ms]
+        if drifted:
+            problems.append(
+                "the same component costs different amounts in different "
+                f"processes, by more than {max_spread_pct:.0f}%, so one pass's "
+                "number is not reproducible: " + "; ".join(drifted[:4])
+                + (f" (+{len(drifted) - 4} more)" if len(drifted) > 4 else ""))
 
     # ---- additivity
     try:

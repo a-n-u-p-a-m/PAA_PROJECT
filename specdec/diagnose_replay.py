@@ -41,6 +41,7 @@ Timing only, no energy counter, so it runs in a couple of minutes.
 from __future__ import annotations
 
 import argparse
+import json
 import statistics
 import sys
 import time
@@ -142,6 +143,88 @@ def in_pass_ms(module, forward, device, seconds: float) -> tuple[float, str]:
     return acc["t"] / max(acc["n"], 1) * 1000, acc["seen"]
 
 
+def audit_file(path: str, tok, draft, target, args) -> list[tuple]:
+    """Time every component in place and compare with what a CLEAR file recorded.
+
+    The deep dive below explains one component. This sweeps all of them at
+    once, so a finished run can be checked for contaminated cells in a
+    couple of minutes and without a GPU slot: every measurement whose
+    amplified time does not match its in-pass time was measuring a kernel
+    the real pass does not run, and its energy is over-attributed by the
+    same factor.
+    """
+    blob = json.loads(Path(path).read_text())
+    if blob.get("kind") != "clear":
+        print(f"\n!! {path} is not a run_clear.py output")
+        return []
+    st = blob.get("settings", {})
+    if st.get("quant") and st["quant"] != args.quant:
+        print(f"\n!! {path} measured the target at {st['quant']} but this process "
+              f"loaded {args.quant}. Re-run with --quant {st['quant']}: comparing "
+              f"across precisions would say nothing about either.")
+        return []
+
+    kv_bin = st.get("kv_bin", 128)
+    layers = blob.get("meta", {}).get("layers") or {}
+    timer = clear.InPassTimer(kv_bin=kv_bin, max_spans=args.spans,
+                              cuda=args.device.startswith("cuda"))
+    timer.attach(draft, "draft", layers.get("draft")
+                 or clear.representative_layers(draft.config.num_hidden_layers))
+    timer.attach(target, "target", layers.get("target")
+                 or clear.representative_layers(target.config.num_hidden_layers))
+    ks = st.get("k") or [1, 4, 8]
+    samples = ds.load(st.get("dataset") or args.dataset, limit=args.audit_prompts,
+                      seed=st.get("seed", args.seed), offline=args.offline)
+    gen = dict(max_new_tokens=st.get("max_new_tokens") or 256,
+               eos_token_id=tok.eos_token_id)
+    print(f"\n=== audit {path}")
+    print(f"    {len(samples)} prompt(s), K={ks}, {gen['max_new_tokens']} tokens, "
+          f"kv_bin {kv_bin}, layers {layers or 'default'}")
+    with timer:
+        for s in samples:
+            ids = encode(tok, s.prompt, args.device, not args.no_chat_template)
+            for k in ks:
+                speculative_generate(draft, target, ids, k=k, **gen)
+            autoregressive_generate(target, ids, **gen)
+    timed = timer.results()
+
+    rows, untimed = [], []
+    for m in blob["measurements"]:
+        got = timed.get(m["label"], {}).get("in_pass_ms")
+        if got and m.get("time_ms"):
+            rows.append((m["time_ms"] / got, m["label"], m["time_ms"], got,
+                         m.get("energy_mj")))
+        else:
+            untimed.append(m["label"])
+    if not rows:
+        print("    nothing lined up: no label in the file was reached by this "
+              "pass. Check --quant, and that the K values above match the file's.")
+        return []
+
+    rows.sort(reverse=True)
+    bad = [r for r in rows if not 0.8 <= r[0] <= 1.2]
+    print(f"\n    {'ratio':>6}  {'label':<34} {'amplified':>10} {'in pass':>9} "
+          f"{'energy':>10}")
+    for ratio, label, amp, got, mj in rows[:args.audit_show]:
+        flag = "  <-- over-attributed" if ratio > 1.2 else (
+            "  <-- under" if ratio < 0.8 else "")
+        e = f"{mj:10.2f}" if mj else "         -"
+        print(f"    {ratio:6.2f}  {label:<34} {amp:10.3f} {got:9.3f} {e}{flag}")
+    if len(rows) > args.audit_show:
+        print(f"    ... {len(rows) - args.audit_show} more inside the band")
+    print(f"\n    {len(bad)}/{len(rows)} measurements do not match their in-pass "
+          f"cost; {len(untimed)} could not be timed by this pass")
+    if bad:
+        worst = bad[0]
+        print(f"    worst: {worst[1]} at {worst[0]:.2f}x -- its energy "
+              f"({worst[4]:.1f} mJ/call) is over-attributed by about that much."
+              if worst[4] else f"    worst: {worst[1]} at {worst[0]:.2f}x")
+        print("    These cells have to be re-measured, not rescaled: the GPU "
+              "really spent that energy,\n    it just spent it running a kernel "
+              "the real pass does not use.")
+    return rows
+
+
 def main() -> None:
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--profile", choices=sorted(PROFILES))
@@ -169,6 +252,19 @@ def main() -> None:
     ap.add_argument("--layer", type=int, default=None, help="default: the middle layer")
     ap.add_argument("--max-new-tokens", type=int, default=48)
     ap.add_argument("--seconds", type=float, default=1.5, help="per timing")
+
+    g = ap.add_argument_group("audit (sweep a finished file instead of one component)")
+    g.add_argument("--audit", nargs="+", metavar="JSON",
+                   help="CLEAR output(s) to check: times every component in "
+                        "place and lists each measurement whose amplified cost "
+                        "does not match, so a finished run can be screened for "
+                        "contaminated cells without a GPU slot")
+    g.add_argument("--audit-prompts", type=int, default=1,
+                   help="prompts to run the audit over (default 1)")
+    g.add_argument("--spans", type=int, default=24,
+                   help="timed calls kept per measurement key (default 24)")
+    g.add_argument("--audit-show", type=int, default=25,
+                   help="rows to print, widest ratio first (default 25)")
     if known.profile:
         p = PROFILES[known.profile]
         ap.set_defaults(config=p.config, dataset=p.dataset)
@@ -177,6 +273,15 @@ def main() -> None:
     pair = MODEL_PAIRS[args.config]
     tok, draft, target = load_pair(pair, args)
     dev = args.device
+
+    if args.audit:
+        for path in args.audit:
+            audit_file(path, tok, draft, target, args)
+        print("\nRe-measure every cell listed above with run_clear.py; the gate "
+              "now refuses\na file whose amplified times do not match its "
+              "in-pass times.")
+        return
+
     model = {"draft": draft, "target": target}[args.role]
     n_layers = model.config.num_hidden_layers
     layer = n_layers // 2 if args.layer is None else args.layer

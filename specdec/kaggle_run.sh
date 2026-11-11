@@ -18,10 +18,16 @@
 
 MODE="${1:-full}"
 QUANT="${QUANT:-nf4}"
+REPEAT="${REPEAT:-2}"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 WORK=/kaggle/working/specdec
 STAMP=$(date +%Y%m%d-%H%M)
 export HF_HOME=/kaggle/working/hf
+# cuBLAS chooses a kernel partly from the workspace it may use and caches the
+# choice per process. Fixing it makes the choice the same from run to run, so
+# a bad one is a stable fact the gate can catch instead of a lottery.
+# run_clear.py sets this too; here so every step in this script shares it.
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 say() { printf '\n======== [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
@@ -70,9 +76,14 @@ fi
 # 75 W: nothing on a 70 W T4 can draw more, so a reading above it is wrong.
 COMMON="--profile kaggle-t4 --quant $QUANT --roles $ROLES --gate --gate-max-w 75"
 
-say "CLEAR quick check ($QUANT, roles: $ROLES)"
+say "CLEAR quick check ($QUANT, roles: $ROLES, $REPEAT fresh processes)"
 # --gate judges the file this run wrote and exits 3 if it is not good enough.
-python run_clear.py $COMMON --quick 2>&1 | tee "results/clear-quick-$QUANT.log"
+# --repeat measures the whole thing again in a fresh process: a kernel pick is
+# made once per process and cached, so this is the only way to see one that is
+# not reproducible. Cheap here, which is why it belongs on the quick check
+# rather than the full pass. REPEAT=1 to skip, REPEAT=3 if the slot allows.
+python run_clear.py $COMMON --quick --repeat "$REPEAT" 2>&1 \
+    | tee "results/clear-quick-$QUANT.log"
 RC=${PIPESTATUS[0]}
 [ "$RC" -eq 3 ] && { echo "quick gate failed -- bring the archive back for a look"; exit 1; }
 [ "$RC" -eq 0 ] || { echo "quick run failed"; exit 1; }
@@ -82,6 +93,13 @@ say "CLEAR full pass (~1.5-2 h; resumes if re-run)"
 python run_clear.py $COMMON --deadline 600m --resume 2>&1 | tee "results/clear-full-$QUANT.log"
 RC=${PIPESTATUS[0]}
 [ "$RC" -eq 0 ] || [ "$RC" -eq 3 ] || { echo "full pass failed"; exit 1; }
+
+say "audit: does every replay cost what the component costs in the real pass?"
+# run_clear.py already anchors each measurement as it takes it, so for a file
+# written just now this is a second opinion in its own file -- and the only way
+# to screen a file measured before the anchor existed.
+python diagnose_replay.py --profile kaggle-t4 --quant "$QUANT" --audit "$OUT" \
+    2>&1 | tee "results/clear-audit-$QUANT.txt"
 
 say "composing E(K) against the existing T4 sweep"
 if [ "$RC" -eq 3 ]; then

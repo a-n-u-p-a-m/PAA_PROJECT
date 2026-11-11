@@ -5,7 +5,8 @@ The baseline sweep already holds the call counts (`round_detail`); this phase
 supplies the cost per call.
 
 ```
-run_clear.py          capture -> replay check -> amplify  ->  clear-*.json
+run_clear.py          capture -> in-pass timing -> replay check -> amplify
+                                                            ->  clear-*.json
 analyze.py SWEEP --clear clear-*.json                      ->  E(K), split by component
 ```
 
@@ -85,19 +86,97 @@ python run_clear.py --check results/clear-qwen2.5-3b-float16.json
 
 The gate fails on: a replay mismatch, more than 10% of measurements outside
 the bar, metering overhead above 5%, forward additivity outside 0.8–1.25, a
-missing role, and **a part that takes longer replayed alone than the whole
-that contains it** (in ms, so it needs no counter). That last one is what
-the first fp16 pass tripped: the target MLP at rows=1 took 2.29 ms alone
-against 1.31 ms for its whole layer. It warns, without failing, when layer
-additivity leaves 0.8–1.25 or when fewer rows cost more than more rows. The
-total is built from forward measurements, so those do not corrupt E(K), but
-they do mean the component split is not yet trustworthy at that level.
-When a part is slower alone than in the pass, find out why before
-re-measuring:
+missing role, **a part that takes longer replayed alone than the whole that
+contains it**, **an amplified cost that does not match what the component
+costs inside the real pass** (0.7–1.4), and **a component whose cost is not
+reproducible in a fresh process** (over 25%, when `--repeat` was used). The
+last three all work in ms, so they need no counter. It warns, without
+failing, when layer additivity leaves 0.8–1.25, when fewer rows cost more
+than more rows, or when a file carries no in-pass times at all. The total is
+built from forward measurements, so a warning does not corrupt E(K), but it
+does mean the component split is not yet trustworthy at that level.
+
+### The anchor, and why the other checks were not enough
+
+The replay check proves a replayed call returns the same **values**. It does
+not prove it does the same **work**. cuBLAS picks a kernel partly from the
+workspace available, caches the pick for the life of the process, and may
+pick differently for a tight loop of one component than for that component
+inside a forward pass. A bad pick is then *stable*: it survives the settle
+window, reads a steady rsd, and keeps W plausible, because time and energy
+inflate together.
+
+Both real failures were this, and neither was caught by the gates CLEAR
+publishes:
+
+| | what happened | what saw it |
+|---|---|---|
+| fp16 `target/mlp` q1 | 2.30 ms amplified, 0.55 ms in a fresh process, inside a 1.31 ms layer | part-vs-whole, and additivity at 2.11 |
+| NF4 `target/lm_head` q1 | 10.89 ms amplified against 2.50 ms in the pass | **nothing** — the file passed |
+
+`lm_head` sits in no layer, so part-vs-whole has no whole to compare it
+with, and 8 ms of excess against a 75 ms forward pass leaves additivity at
+1.02. So stage 1b times every component **where it actually runs**, by hooks
+with CUDA events and no synchronisation in the loop, and the gate compares
+every amplified measurement against that. The band is 0.7–1.4 rather than
+tight around 1: a part replayed alone legitimately pays launch and sync
+costs that overlap in the real pass (a sound T4 `lm_head` read 1.33×), and
+an in-pass span carries the hook's own overhead. The failures it exists to
+catch were 4.2× and 4.4×.
+
+Each amplify line prints `anchor N.NNx`, with `!!` when it leaves the band.
+`--no-anchor` skips the stage; nothing then checks this.
+
+Two things only warn rather than fail, because in both the ratio is an
+artefact of how the span is taken:
+
+- **components under 0.2 ms amplified.** An in-pass span is bracketed on the
+  stream, so for a launch-bound component it also covers the gaps where the
+  GPU waits for the CPU, and the replay looks faster than the pass. The
+  floor is on the amplified time, not the in-pass time — an inflated in-pass
+  reading is what this is protecting against, so letting it clear its own
+  floor would exempt the cases worth catching. `embed`, `rope` and the norms
+  sit here, and together they are a few percent of a forward pass.
+- **in-pass times taken without CUDA events** (any CPU run), which charge
+  Python dispatch to the component.
+
+To screen a file measured **before** the anchor existed, with no GPU slot and
+in a couple of minutes:
+
+```bash
+python diagnose_replay.py --profile kaggle-t4 --quant nf4 \
+    --audit results/clear-qwen2.5-3b-nf4.json
+```
+
+That times every component in place and lists each measurement whose
+amplified cost does not match, widest ratio first. Those cells have to be
+**re-measured, not rescaled**: the GPU really spent that energy, it just
+spent it running a kernel the real pass does not use.
+
+To explain one component rather than screen all of them:
 
 ```bash
 python diagnose_replay.py --profile kaggle-t4 --quant float16
 ```
+
+### Repeatability across processes
+
+`rel_std_pct` is trial-to-trial spread *within* one process, which is the
+small variance component — 1.4% median on the T4. The large one is between
+processes, where the same unquantised `lm_head` matmul read 3.66 ms in one
+pass and 16.89 ms in another. `--repeat N` measures everything again, each
+time in a fresh process, and records how far each component moved:
+
+```bash
+python run_clear.py --profile kaggle-t4 --quick --repeat 3 --gate
+```
+
+It re-execs rather than looping, because a repeat inside one process cannot
+see the thing worth seeing. It belongs on the quick check, where it is
+cheap; `kaggle_run.sh` runs it there by default (`REPEAT=1` to skip,
+`REPEAT=3` if the slot allows). Components below 0.05 ms are exempt — a call
+of a few microseconds swings for reasons unrelated to kernel choice, and no
+composed total leans on one.
 
 How amplification works, since it is the part most easily got wrong: each
 component first runs untimed for 1.5 s, so the GPU's power state belongs to
@@ -194,4 +273,7 @@ CLEAR composition (mJ above idle per emitted token)
 | `energy counter stopped updating` | NVML stalled; rerun with `--resume` |
 | small components look implausibly cheap | weights hot in L2 from back-to-back replay; compare a `--flush-l2` run |
 | gate: a part is slower alone than its whole | the replay runs a different kernel or memory path from the real pass; run `diagnose_replay.py` and do not use that row count until it is explained |
+| gate: amplified cost does not match the in-pass cost | the replay is running a kernel the pass does not. Re-measure that cell; do not rescale it. `--audit` lists every cell with the problem, `diagnose_replay.py` on one component says which variant brings it back down |
+| gate: not reproducible in a fresh process | the kernel pick differs between processes. `CUBLAS_WORKSPACE_CONFIG` is set to pin it; if the spread survives that, quote the spread as the error bar rather than one pass's number |
+| `no in-pass timings in this file` | measured with `--no-anchor`, or before stage 1b existed. Screen it with `--audit` before quoting any component split |
 | CLEAR/meas well above 1 | parts replayed alone each pay launch overhead; compare the additivity ratios |

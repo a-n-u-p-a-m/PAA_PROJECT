@@ -335,19 +335,29 @@ def test_measure_and_compose_end_to_end():
           + f"; {len(checks)} additivity checks")
 
 
-def _m(role, comp, rows, ms, layer=None, kv=None, rel=2.0):
-    """One hand-made measurement, energy at a flat 50 W."""
+def _m(role, comp, rows, ms, layer=None, kv=None, rel=2.0, in_pass=None):
+    """One hand-made measurement, energy at a flat 50 W.
+
+    ``in_pass`` defaults to the amplified time, i.e. a replay that is doing
+    exactly the work the pass did; pass it explicitly to model one that is not.
+    """
     key = clear.Key(role, comp, layer, rows, 0 if kv is not None else None)
     return {"label": key.label, "role": role, "component": comp, "layer": layer,
             "rows": rows, "kv_bin": key.kv_bin, "kv_mean": kv,
             "rows_mean": rows if rows is not None else 10,
             "time_ms": ms, "energy_mj": ms * 50.0, "dynamic_mj": None,
             "power_w": 50.0, "rel_std_pct": rel, "trials": 5, "ok": True,
-            "why": "", "meter_overhead_pct": 1.0}
+            "why": "", "meter_overhead_pct": 1.0,
+            "in_pass_ms": ms if in_pass is None else in_pass, "in_pass_n": 8}
 
 
 def _blob(role="target", mlp_q1_ms=0.4, quant="float16"):
-    """A two-layer model whose parts add up exactly, unless mlp q1 is changed."""
+    """A two-layer model whose parts add up exactly, unless mlp q1 is changed.
+
+    The mlp's in-pass cost stays at the honest 0.4 ms, so raising
+    ``mlp_q1_ms`` reproduces the fp16 failure as it really was: an
+    amplified reading that no longer matches the work the pass did.
+    """
     ms = [_m(role, "prefill", None, 20.0)]
     for rows in (1, 2):
         ms += [
@@ -356,13 +366,14 @@ def _blob(role="target", mlp_q1_ms=0.4, quant="float16"):
             _m(role, "attn", rows, 0.7, layer=0, kv=100),
             _m(role, "norm_in", rows, 0.1, layer=0),
             _m(role, "norm_post", rows, 0.1, layer=0),
-            _m(role, "mlp", rows, mlp_q1_ms if rows == 1 else 0.4, layer=0),
+            _m(role, "mlp", rows, mlp_q1_ms if rows == 1 else 0.4, layer=0,
+               in_pass=0.4),
             _m(role, "embed", rows, 0.01), _m(role, "rope", rows, 0.1),
             _m(role, "norm", rows, 0.1), _m(role, "lm_head", rows, 3.0),
         ]
     return {"kind": "clear",
             "meta": {"n_layers": {role: 2}, "device": "test",
-                     "model_pair": {"key": "pair"}},
+                     "model_pair": {"key": "pair"}, "in_pass_events": True},
             "settings": {"quant": quant, "draft_precision": "float16"},
             "replay_check": {"total": len(ms), "mismatched": 0},
             "measurements": ms}
@@ -382,11 +393,148 @@ def test_gate_catches_a_part_slower_than_its_whole():
         f"additivity of ~1.65 got through: {bad['problems']}")
     assert any("fewer rows cost more" in w for w in bad["warnings"]), (
         f"q1 slower than q2 drew no warning: {bad['warnings']}")
+    assert any("inside the real pass" in p for p in bad["problems"]), (
+        f"a 2.3 ms replay of a 0.4 ms component passed the anchor: {bad['problems']}")
 
     half = clear.gate(_blob(), roles=["draft", "target"])
     assert any("draft" in p for p in half["problems"]), (
         f"a target-only file passed as draft+target: {half['problems']}")
-    print("  ok  sound file passes; slow part, bad additivity and missing role fail")
+
+    blind = _blob()
+    for m in blind["measurements"]:
+        m.pop("in_pass_ms")
+    assert any("kernel-choice check did not run" in w
+               for w in clear.gate(blind)["warnings"]), (
+        "a file with no in-pass timings passed without a word about it")
+    print("  ok  sound file passes; slow part, bad additivity, missing role, "
+          "unanchored replay and an un-anchored file all flagged")
+
+
+def test_in_pass_timer_keys_match_the_store():
+    """The anchor is only meaningful if it compares like with like. Running
+    both over the same decode must produce the same set of keys, or a
+    measurement would be checked against some other shape's cost."""
+    draft, target = _pair()
+    timer = clear.InPassTimer(kv_bin=8, cuda=False)
+    timer.attach(draft, "draft", clear.representative_layers(3))
+    timer.attach(target, "target", clear.representative_layers(3))
+    with _store(draft, target) as store:
+        with timer:
+            speculative_generate(draft, target, _prompt(), k=3, max_new_tokens=32)
+            autoregressive_generate(target, _prompt(), max_new_tokens=16)
+
+    timed = timer.results()
+    captured = {key.label for key, caps in store.items() if caps}
+    assert timed, "the timer recorded nothing"
+    missing = captured - set(timed)
+    extra = set(timed) - captured
+    assert not missing, f"{len(missing)} measured keys have no in-pass time: {sorted(missing)[:5]}"
+    assert not extra, f"the timer invented keys the store never saw: {sorted(extra)[:5]}"
+    assert all(v["in_pass_ms"] > 0 for v in timed.values()), "a zero in-pass time"
+    assert all(v["in_pass_n"] <= timer.max_spans for v in timed.values()), "span cap leaked"
+    print(f"  ok  {len(timed)} keys timed in place, exactly the keys captured")
+
+
+def _big_blob(lm_head_ms=2.5, lm_head_in_pass=2.5):
+    """A 36-layer target sized like the real NF4 run, so an inflated lm_head
+    is small against the whole forward pass instead of dwarfing it."""
+    role, n = "target", 36
+    ms = [_m(role, "prefill", None, 40.0)]
+    for rows in (1, 2):
+        ms += [
+            _m(role, "forward", rows, 75.14, kv=100),
+            _m(role, "layer", rows, 2.04, layer=0, kv=100),
+            _m(role, "attn", rows, 1.19, layer=0, kv=100),
+            _m(role, "norm_in", rows, 0.0985, layer=0),
+            _m(role, "norm_post", rows, 0.0979, layer=0),
+            _m(role, "mlp", rows, 0.437, layer=0),
+            _m(role, "embed", rows, 0.0156), _m(role, "rope", rows, 0.127),
+            _m(role, "norm", rows, 0.1005),
+            _m(role, "lm_head", rows, lm_head_ms, in_pass=lm_head_in_pass),
+        ]
+    return {"kind": "clear",
+            "meta": {"n_layers": {role: n}, "device": "test",
+                     "model_pair": {"key": "pair"}, "in_pass_events": True},
+            "settings": {"quant": "nf4", "draft_precision": "float16"},
+            "replay_check": {"total": len(ms), "mismatched": 0},
+            "measurements": ms}
+
+
+def test_anchor_catches_what_the_other_checks_structurally_cannot():
+    """The NF4 hole. target/lm_head was measured at 10.89 ms against 2.5 ms
+    in the pass -- 4x over -- and the file passed its gate, because lm_head
+    sits in no layer (so part-vs-whole has no whole to compare it with) and
+    the excess is small next to a 75 ms forward (so additivity stays ~1).
+    Only the in-pass anchor can see it."""
+    good = clear.gate(_big_blob())
+    assert not good["problems"], f"sound 36-layer file failed: {good['problems']}"
+
+    bad = clear.gate(_big_blob(lm_head_ms=10.89))
+    assert not any("longer than the whole" in p for p in bad["problems"]), (
+        "part-vs-whole should have nothing to say about lm_head here")
+    assert not any("additivity" in p for p in bad["problems"]), (
+        f"additivity should stay inside its band: {bad['problems']}")
+    assert any("inside the real pass" in p for p in bad["problems"]), (
+        f"a 4x inflated lm_head passed every check: {bad['problems']}")
+
+    # A legitimate replay runs somewhat hot -- it pays launch and sync costs
+    # that overlap with other work in the real pass. A sound T4 lm_head read
+    # 1.33x, so the band must not call that a failure.
+    honest = clear.gate(_big_blob(lm_head_ms=2.5 * 1.33))
+    assert not honest["problems"], (
+        f"1.33x, which a sound measurement really showed, was failed: "
+        f"{honest['problems']}")
+
+    # A launch-bound component's in-pass span is mostly the GPU waiting for
+    # the CPU, so the replay looks faster than the pass. That is an artefact,
+    # and nothing that small moves a composed total: warn, do not fail.
+    tiny = _big_blob()
+    for m in tiny["measurements"]:
+        if m["component"] == "rope":
+            m["in_pass_ms"] = m["time_ms"] * 4        # 0.127 ms -> 0.25x
+    out = clear.gate(tiny)
+    assert not out["problems"], (
+        f"a 0.127 ms rope was used to fail a run: {out['problems']}")
+    assert any("launch gaps" in w for w in out["warnings"]), (
+        f"an off-band small component was not even mentioned: {out['warnings']}")
+
+    # Without CUDA events an in-pass span charges Python dispatch to the
+    # component, so the same ratio must not fail a run, only flag it.
+    coarse = _big_blob(lm_head_ms=10.89)
+    coarse["meta"]["in_pass_events"] = False
+    out = clear.gate(coarse)
+    assert not any("inside the real pass" in p for p in out["problems"]), (
+        "a CPU-grade in-pass time was used to fail a run")
+    assert any("too coarse" in w for w in out["warnings"]), (
+        f"coarse timings drew no warning at all: {out['warnings']}")
+    print("  ok  4x lm_head: invisible to part-vs-whole and additivity, caught "
+          "by the anchor; 1.33x allowed; CPU-grade timings only warn")
+
+
+def test_gate_fails_a_component_that_is_not_reproducible_across_processes():
+    """--repeat records what each component cost in fresh processes. A pick
+    that differs between them means one pass's number is not a property of
+    the component, so the spread has to be a problem, not a footnote."""
+    blob = _blob()
+    blob["repeat_spread"] = {"passes": 3, "by_label": {
+        "target/mlp/q1": 4.0, "target/attn/q1/kv0": 2.5}}
+    ok = clear.gate(blob)
+    assert not ok["problems"], f"4% spread should pass: {ok['problems']}"
+    assert any("between-process spread" in line for line in ok["lines"]), (
+        f"the spread was not reported: {ok['lines']}")
+
+    blob["repeat_spread"]["by_label"]["target/mlp/q1"] = 315.0
+    drift = clear.gate(blob)
+    assert any("different processes" in p for p in drift["problems"]), (
+        f"a 315% between-process spread passed: {drift['problems']}")
+
+    # A call of a few microseconds swings for reasons unrelated to kernel
+    # choice, and no composed total leans on one, so the floor excludes it.
+    blob["repeat_spread"]["min_ms"] = {"target/mlp/q1": 0.004}
+    tiny = clear.gate(blob)
+    assert not any("different processes" in p for p in tiny["problems"]), (
+        f"a 4 us component was failed for moving 315%: {tiny['problems']}")
+    print("  ok  small spread reported; 315% fails; 315% on a 4 us call does not")
 
 
 def test_composed_total_carries_measurement_error():
@@ -461,6 +609,10 @@ if __name__ == "__main__":
         ("default polling + meter check", test_default_polling_on_a_t4_like_counter),
         ("measure + compose", test_measure_and_compose_end_to_end),
         ("gate", test_gate_catches_a_part_slower_than_its_whole),
+        ("anchor vs in-pass", test_anchor_catches_what_the_other_checks_structurally_cannot),
+        ("in-pass timer keys", test_in_pass_timer_keys_match_the_store),
+        ("between-process spread",
+         test_gate_fails_a_component_that_is_not_reproducible_across_processes),
         ("error bars", test_composed_total_carries_measurement_error),
         ("merge keeps precisions apart", test_merge_never_mixes_precisions_of_one_model),
     ]
