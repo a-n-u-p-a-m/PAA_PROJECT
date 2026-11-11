@@ -202,26 +202,51 @@ def audit_file(path: str, tok, draft, target, args) -> list[tuple]:
         return []
 
     rows.sort(reverse=True)
-    bad = [r for r in rows if not 0.8 <= r[0] <= 1.2]
+    lo, hi = clear.ANCHOR_BAND
+    floor = clear.ANCHOR_FLOOR_MS
+    off = [r for r in rows if not lo <= r[0] <= hi]
+    # Split the way gate() does, so this does not raise an alarm about cells
+    # the gate will wave through. Judged by the amplified cost, since an
+    # inflated in-pass reading must not be able to clear its own floor.
+    blocking = [r for r in off if r[2] >= floor]
+    small = [r for r in off if r[2] < floor]
+
     print(f"\n    {'ratio':>6}  {'label':<34} {'amplified':>10} {'in pass':>9} "
           f"{'energy':>10}")
-    for ratio, label, amp, got, mj in rows[:args.audit_show]:
-        flag = "  <-- over-attributed" if ratio > 1.2 else (
-            "  <-- under" if ratio < 0.8 else "")
+    for ratio, label, amp, got, mj in blocking[:args.audit_show]:
         e = f"{mj:10.2f}" if mj else "         -"
-        print(f"    {ratio:6.2f}  {label:<34} {amp:10.3f} {got:9.3f} {e}{flag}")
-    if len(rows) > args.audit_show:
-        print(f"    ... {len(rows) - args.audit_show} more inside the band")
-    print(f"\n    {len(bad)}/{len(rows)} measurements do not match their in-pass "
-          f"cost; {len(untimed)} could not be timed by this pass")
-    if bad:
-        worst = bad[0]
-        print(f"    worst: {worst[1]} at {worst[0]:.2f}x -- its energy "
-              f"({worst[4]:.1f} mJ/call) is over-attributed by about that much."
-              if worst[4] else f"    worst: {worst[1]} at {worst[0]:.2f}x")
-        print("    These cells have to be re-measured, not rescaled: the GPU "
-              "really spent that energy,\n    it just spent it running a kernel "
-              "the real pass does not use.")
+        print(f"    {ratio:6.2f}  {label:<34} {amp:10.3f} {got:9.3f} {e}"
+              f"{'  <-- over-attributed' if ratio > hi else '  <-- under'}")
+    if len(blocking) > args.audit_show:
+        print(f"    ... {len(blocking) - args.audit_show} more over the bar, "
+              f"not shown (raise --audit-show)")
+    if not blocking:
+        print("    (nothing over the bar)")
+
+    print(f"\n    over the bar -- outside {lo}-{hi}x at or above {floor} ms: "
+          f"{len(blocking)}/{len(rows)}. These fail the gate.")
+    if small:
+        counts: dict[str, int] = {}
+        for _, label, _, _, _ in small:
+            comp = label.split("/")[1]
+            counts[comp] = counts.get(comp, 0) + 1
+        print(f"    under {floor} ms and outside the band: {len(small)} "
+              f"(worst {max(small)[0]:.2f}x) -- "
+              + ", ".join(f"{c} x{n}" for c, n in sorted(counts.items())))
+        print(f"    Amplifying a call that short measures mostly Python and "
+              f"launch overhead, which\n    the real pass overlaps. Re-running "
+              f"will not change it. The gate reports these\n    instead of "
+              f"failing, and no composed total leans on them -- but their share "
+              f"of\n    the component split is an upper bound, not a measurement.")
+    print(f"    {len(untimed)} could not be timed by this pass")
+    if blocking:
+        worst = blocking[0]
+        print(f"\n    worst over the bar: {worst[1]} at {worst[0]:.2f}x"
+              + (f" -- its energy ({worst[4]:.1f} mJ/call) is over-attributed "
+                 f"by about that much." if worst[4] else ""))
+        print("    These have to be re-measured, not rescaled: the GPU really "
+              "spent that energy,\n    it just spent it running a kernel the "
+              "real pass does not use.")
     return rows
 
 

@@ -46,6 +46,14 @@ import torch
 from .kv import cache_length, crop_cache, new_cache
 
 #: components whose cost depends on context length, and so get a kv bin
+#: amplified / in-pass time a measurement must land in, and the amplified
+#: cost below which it is reported rather than judged. One source of truth,
+#: so ``gate()`` and ``diagnose_replay.py --audit`` cannot disagree about
+#: which cells are a problem. See ``InPassTimer`` for why the band is not
+#: centred on 1 and why there is a floor at all.
+ANCHOR_BAND = (0.7, 1.4)
+ANCHOR_FLOOR_MS = 0.2
+
 KV_DEPENDENT = ("attn", "layer", "forward")
 
 #: per-layer components; the rest occur once per forward pass
@@ -639,7 +647,7 @@ class AmplifyConfig:
     # pass, so somewhat above 1 is honest (a sound T4 lm_head read 1.33x).
     # Below 1 is honest too, since an in-pass span carries the hook's own
     # overhead. The failures this exists to catch were 4.2x and 4.4x.
-    anchor_band: tuple = (0.7, 1.4)
+    anchor_band: tuple = ANCHOR_BAND
 
 
 def _sync(device) -> None:
@@ -1240,8 +1248,8 @@ def gate(blob: dict, roles: Optional[Iterable[str]] = None,
          max_power_w: Optional[float] = None,
          forward_range: tuple[float, float] = (0.8, 1.25),
          layer_range: tuple[float, float] = (0.8, 1.25),
-         anchor_band: tuple[float, float] = (0.7, 1.4),
-         anchor_floor_ms: float = 0.2,
+         anchor_band: tuple[float, float] = ANCHOR_BAND,
+         anchor_floor_ms: float = ANCHOR_FLOOR_MS,
          max_spread_pct: float = 25.0,
          spread_floor_ms: float = 0.05) -> dict:
     """Is this ``run_clear.py`` output fit to compose from?
