@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import math
 import random
 import statistics
 import threading
@@ -844,18 +845,44 @@ class Costs:
                      "time_ms": "ms"}[metric]
         self.approximated: dict[str, int] = {}
         self.table: dict[tuple, list[tuple[float, float]]] = {}
-        per_token: dict[str, list[float]] = {}
+        #: standard error of each table entry, in the same order as ``table``
+        self.err: dict[tuple, list[float]] = {}
+        raw: dict[tuple, list[tuple[float, float, float]]] = {}
+        per_token: dict[str, list[tuple[float, float]]] = {}
         for m in ms:
             v = m[self.metric]
+            se = self._stderr(m, v)
             if m["component"] == "prefill":
                 # prefill is charged per prompt token; prompts differ in length
-                per_token.setdefault(m["role"], []).append(v / m["rows_mean"])
+                per_token.setdefault(m["role"], []).append(
+                    (v / m["rows_mean"], se / m["rows_mean"]))
                 continue
             k = (m["role"], m["component"], m["layer"], m["rows"])
-            self.table.setdefault(k, []).append((m["kv_mean"] or 0.0, v))
-        for k in self.table:
-            self.table[k].sort()
-        self.prefill = {r: statistics.mean(v) for r, v in per_token.items()}
+            raw.setdefault(k, []).append((m["kv_mean"] or 0.0, v, se))
+        for k, pts in raw.items():
+            pts.sort()
+            self.table[k] = [(kv, v) for kv, v, _ in pts]
+            self.err[k] = [se for _, _, se in pts]
+        self.prefill = {r: statistics.mean(v for v, _ in pts)
+                        for r, pts in per_token.items()}
+        self.prefill_err = {r: math.sqrt(sum(se * se for _, se in pts)) / len(pts)
+                            for r, pts in per_token.items()}
+
+    def _stderr(self, m: dict, v: float) -> float:
+        """Standard error of one measurement, from its trial-to-trial spread.
+
+        ``rel_std_pct`` is the spread of energy per call across trials (of
+        time per call when there is no counter). Energy above idle has the
+        same absolute spread as total energy, not the same relative one. The
+        reported value is a median, whose standard error is ~1.2533 sigma/sqrt(n).
+        """
+        rel, n = m.get("rel_std_pct"), m.get("trials") or 0
+        if rel is None or n < 2:
+            return 0.0
+        base = v
+        if self.metric == "dynamic_mj" and m.get("energy_mj") is not None:
+            base = m["energy_mj"]
+        return 1.2533 * rel / 100.0 * abs(base) / math.sqrt(n)
 
     def layers(self, role: str) -> list[int]:
         return sorted({k[2] for k in self.table if k[0] == role and k[2] is not None})
@@ -885,6 +912,46 @@ class Costs:
             if x0 <= kv <= x1:
                 return y0 if x1 == x0 else y0 + (y1 - y0) * (kv - x0) / (x1 - x0)
         return pts[-1][1]
+
+    def total_terms(self, role: str, rows: int, kv: int) -> list[tuple[tuple, float]]:
+        """``call()["total"]`` as a weighted sum of measurements.
+
+        Returns ``(measurement id, weight)`` pairs, mirroring the lookup and
+        context interpolation in ``get``. ``compose`` adds these up so the
+        measurement uncertainty can be carried into the per-K totals.
+        """
+        if kv == 0:
+            return [(("prefill", role), float(rows))]
+        key = (role, "forward", None, rows)
+        if key not in self.table:
+            near = [k for k in self.table if k[:3] == key[:3]]
+            if not near:
+                raise KeyError(f"no measurement for {role}/forward")
+            key = min(near, key=lambda k: abs(k[3] - rows))
+        pts = self.table[key]
+        if len(pts) == 1 or kv <= pts[0][0]:
+            return [((key, 0), 1.0)]
+        if kv >= pts[-1][0]:
+            return [((key, len(pts) - 1), 1.0)]
+        for i, ((x0, _), (x1, _)) in enumerate(zip(pts, pts[1:])):
+            if x0 <= kv <= x1:
+                if x1 == x0:
+                    return [((key, i), 1.0)]
+                t = (kv - x0) / (x1 - x0)
+                return [((key, i), 1.0 - t), ((key, i + 1), t)]
+        return [((key, len(pts) - 1), 1.0)]
+
+    def stderr(self, ident: tuple) -> float:
+        """Standard error of one measurement id from ``total_terms``."""
+        if ident[0] == "prefill":
+            return self.prefill_err.get(ident[1], 0.0)
+        key, i = ident
+        return self.err[key][i]
+
+    def combined_stderr(self, weights: dict) -> float:
+        """Standard error of ``sum(weight x measurement)``, the measurements
+        being independent of each other."""
+        return math.sqrt(sum((w * self.stderr(i)) ** 2 for i, w in weights.items()))
 
     def layer_mean(self, role: str, comp: str, rows: int, kv: int) -> float:
         """Mean over measured layers, standing in for any one layer."""
@@ -934,12 +1001,16 @@ def compose(costs: Costs, rows: list[dict]) -> list[dict]:
     for name, group in by.items():
         spec = name != "autoregressive"
         per_tok, parts = [], {}
+        weights: dict[tuple, float] = {}
         for r in group:
             total = 0.0
             split: dict[str, float] = {}
+            scale = 1.0 / ((r["new_tokens"] or 1) * len(group))
             for role, q, kv, lm in calls_from_rounds(r["round_detail"], spec):
                 c = costs.call(role, q, kv, lm)
                 total += c["total"]
+                for ident, w in costs.total_terms(role, q, kv):
+                    weights[ident] = weights.get(ident, 0.0) + w * scale
                 for k, v in c.items():
                     if k != "total":
                         split[f"{role}.{k}"] = split.get(f"{role}.{k}", 0.0) + v
@@ -951,12 +1022,29 @@ def compose(costs: Costs, rows: list[dict]) -> list[dict]:
             "strategy": name,
             "k": int(name.split("-")[1]) if name.startswith("coga-") else None,
             "clear_per_token": statistics.mean(per_tok),
+            # Repeatability of the forward measurements only. It leaves out
+            # systematic error and prompt sampling, and totals at different K
+            # share measurements, so compare two of them with diff_stderr().
+            "clear_stderr": costs.combined_stderr(weights),
+            "weights": weights,
             "breakdown": {k: statistics.mean(v) for k, v in parts.items()},
             "n_prompts": len(group),
         })
     out.sort(key=lambda r: (r["strategy"] != "autoregressive", r["k"] is None,
                             r["k"] or 0, r["strategy"]))
     return out
+
+
+def diff_stderr(costs: Costs, a: dict, b: dict) -> float:
+    """Standard error of the difference between two ``compose`` records.
+
+    Their totals are built from overlapping measurements, so the errors are
+    correlated and the per-record ``clear_stderr`` values cannot simply be
+    combined; the shared part cancels here.
+    """
+    wa, wb = a["weights"], b["weights"]
+    return costs.combined_stderr({i: wa.get(i, 0.0) - wb.get(i, 0.0)
+                                  for i in set(wa) | set(wb)})
 
 
 def additivity(costs: Costs) -> list[dict]:
@@ -984,3 +1072,123 @@ def additivity(costs: Costs) -> list[dict]:
                             "ratio": parts / whole if whole else None})
     out.sort(key=lambda r: (r["check"], r["rows"], r["kv"]))
     return out
+
+
+def gate(blob: dict, roles: Optional[Iterable[str]] = None,
+         max_power_w: Optional[float] = None,
+         forward_range: tuple[float, float] = (0.8, 1.25),
+         layer_range: tuple[float, float] = (0.8, 1.25)) -> dict:
+    """Is this ``run_clear.py`` output fit to compose from?
+
+    Returns ``{"lines", "problems", "warnings"}``. A problem means the
+    numbers must not be used; a warning means a figure that does not enter
+    the composed total looks off and needs explaining before it is quoted.
+
+    Beyond noise and additivity, two checks look for a replay that is not
+    doing the work the real pass did, using time, which needs no counter:
+    a part replayed alone must not take longer than the whole that contains
+    it, and fewer rows should not take much longer than more rows.
+    """
+    ms = blob["measurements"]
+    problems: list[str] = []
+    warnings: list[str] = []
+    lines: list[str] = []
+
+    present = sorted({m["role"] for m in ms})
+    want = sorted(roles) if roles else present
+    missing = [r for r in want if r not in present]
+    if missing:
+        problems.append(f"no measurements for {', '.join(missing)}")
+    lines.append(f"roles measured:         {', '.join(present) or 'none'}")
+    if not ms:
+        return {"lines": lines, "problems": problems or ["no measurements"],
+                "warnings": warnings}
+
+    rc = blob.get("replay_check") or {}
+    if rc.get("mismatched"):
+        problems.append(f"{rc['mismatched']} replays did not reproduce")
+    if rc:
+        lines.append(f"replays exact:          {rc['total'] - rc['mismatched']}/{rc['total']}")
+
+    bad = [m for m in ms if not m["ok"]]
+    if len(bad) > len(ms) * 0.1:
+        problems.append(f"{len(bad)}/{len(ms)} measurements outside the 10% bar")
+    lines.append(f"inside 10% bar:         {len(ms) - len(bad)}/{len(ms)}")
+
+    over = [m["meter_overhead_pct"] for m in ms if m.get("meter_overhead_pct") is not None]
+    if over:
+        med = statistics.median(over)
+        if abs(med) > 5:
+            problems.append(f"metering adds {med:+.1f}% to call time")
+        lines.append(f"metering overhead:      {med:+.1f}% median")
+
+    if max_power_w:
+        hot = [m.get("label", m["component"]) for m in ms
+               if (m.get("power_w") or 0) > max_power_w]
+        if hot:
+            problems.append(f"impossible power (>{max_power_w:.0f} W): {hot[:3]}")
+
+    # ---- a part must not outlast its whole; rows should not run backwards
+    t = Costs(blob, "time_ms")
+    slow, backwards = [], []
+    by_comp: dict[tuple, dict[int, float]] = {}
+    for (role, comp, layer, rows), pts in t.table.items():
+        by_comp.setdefault((role, comp, layer), {})[rows] = statistics.mean(
+            v for _, v in pts)
+    for (role, comp, layer), by_rows in by_comp.items():
+        where = f"{role}/{comp}" + (f"/L{layer}" if layer is not None else "")
+        if comp in LAYER_PARTS:
+            whole = by_comp.get((role, "layer", layer), {})
+        elif comp in MODEL_PARTS:
+            whole = by_comp.get((role, "forward", None), {})
+        else:
+            whole = {}
+        for rows, v in sorted(by_rows.items()):
+            w = whole.get(rows)
+            if w and v > 1.1 * w:
+                slow.append(f"{where}/q{rows} {v:.3f} ms alone vs {w:.3f} ms for "
+                            f"the whole {'layer' if comp in LAYER_PARTS else 'forward'}")
+        if comp not in KV_DEPENDENT:
+            seq = sorted(by_rows.items())
+            for (r0, v0), (r1, v1) in zip(seq, seq[1:]):
+                if v0 > 1.5 * v1:
+                    backwards.append(f"{where} q{r0} {v0:.3f} ms > q{r1} {v1:.3f} ms")
+    if slow:
+        problems.append("a part replayed alone takes longer than the whole that "
+                        "contains it, so the replay is not the work the pass did: "
+                        + "; ".join(slow[:4])
+                        + (f" (+{len(slow) - 4} more)" if len(slow) > 4 else ""))
+    if backwards:
+        warnings.append("fewer rows cost more than more rows: " + "; ".join(backwards[:4])
+                        + (f" (+{len(backwards) - 4} more)" if len(backwards) > 4 else ""))
+    lines.append(f"part slower than whole: {len(slow)}")
+
+    # ---- additivity
+    try:
+        checks = additivity(Costs(blob))
+    except KeyError as exc:
+        problems.append(f"additivity could not be computed: {exc}")
+        checks = []
+    fwd = [c["ratio"] for c in checks if c["check"].endswith("forward") and c["ratio"]]
+    lay = [c["ratio"] for c in checks if c["check"].endswith("layer") and c["ratio"]]
+    if fwd:
+        lo, hi = forward_range
+        if not all(lo <= r <= hi for r in fwd):
+            problems.append(f"forward additivity {min(fwd):.2f} .. {max(fwd):.2f}, "
+                            f"outside {lo} .. {hi}")
+        lines.append(f"forward additivity:     {min(fwd):.2f} .. {max(fwd):.2f}")
+    elif checks or not problems:
+        problems.append("no forward additivity checks: forward or component "
+                        "measurements are missing")
+    if lay:
+        lo, hi = layer_range
+        if not all(lo <= r <= hi for r in lay):
+            # The composed total is built from forward measurements, so this
+            # does not block it. It does mean the per-component split inside
+            # a layer is off by this much, and if the forward ratio is still
+            # near 1 something outside the layers is over-counted to match.
+            warnings.append(f"layer additivity {min(lay):.2f} .. {max(lay):.2f}, "
+                            f"outside {lo} .. {hi}: the component split is not "
+                            f"yet trustworthy at this level")
+        lines.append(f"layer additivity:       {min(lay):.2f} .. {max(lay):.2f}")
+    return {"lines": lines, "problems": problems, "warnings": warnings}

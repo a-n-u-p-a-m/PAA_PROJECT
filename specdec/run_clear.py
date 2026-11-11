@@ -124,6 +124,14 @@ def parse_args() -> argparse.Namespace:
     g.add_argument("--out", default=None)
     g.add_argument("--resume", action="store_true",
                    help="skip keys already measured in --out")
+    g.add_argument("--gate", action="store_true",
+                   help="after measuring, judge the file just written (replay, "
+                        "noise, additivity, part-vs-whole) and exit 3 if it fails")
+    g.add_argument("--gate-max-w", type=float, default=None, metavar="W",
+                   help="the gate also fails any measurement above this power, "
+                        "e.g. 75 on a 70 W T4")
+    g.add_argument("--check", metavar="JSON",
+                   help="gate an existing output file and exit; loads no model")
     g.add_argument("--deadline", metavar="SPEC",
                    help="stop cleanly before this: '90m', '1h45m', '23:30'")
     g.add_argument("--reserve", type=float, default=2.0,
@@ -146,6 +154,23 @@ def write(path: Path, blob: dict) -> None:
     os.replace(tmp, path)
 
 
+def run_gate(blob: dict, name, roles=None, max_power_w=None) -> bool:
+    """Print the gate's verdict on one output; True if it passed."""
+    g = clear.gate(blob, roles=roles, max_power_w=max_power_w)
+    print(f"\ngate: {name}")
+    for line in g["lines"]:
+        print(f"  {line}")
+    for w in g["warnings"]:
+        print(f"  !! {w}")
+    if g["problems"]:
+        print("\n  GATE FAILED -- do not compose from this file:")
+        for prob in g["problems"]:
+            print(f"    - {prob}")
+        return False
+    print("\n  gate passed" + (" (with warnings)" if g["warnings"] else ""))
+    return True
+
+
 def sensor_period(probe: EnergyProbe):
     from probe_env import sensor_period_ms
 
@@ -158,6 +183,11 @@ def sensor_period(probe: EnergyProbe):
 
 def main() -> None:
     args = parse_args()
+    if args.check:
+        old = json.loads(Path(args.check).read_text())
+        if old.get("kind") != "clear":
+            sys.exit(f"{args.check} is not a run_clear.py output")
+        sys.exit(0 if run_gate(old, args.check, max_power_w=args.gate_max_w) else 3)
     if args.device == "cpu" and args.quant in ("float16", "nf4"):
         args.quant = "float32"
         args.draft_precision = "float32"
@@ -236,6 +266,11 @@ def main() -> None:
             "device": torch.cuda.get_device_name(0) if args.device.startswith("cuda") else "cpu",
             "energy": probe is not None, "sensor_period_ms": period, "idle_watts": idle_w,
             "n_layers": dict(store.n_layers), "layers": layers,
+            # Labels carry no precision, so analyze.py needs this to keep two
+            # files' measurements of the same model apart. "roles" is filled
+            # in from what was actually measured.
+            "precision": {"draft": args.draft_precision, "target": args.quant},
+            "roles": [],
             "torch": torch.__version__,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         },
@@ -274,8 +309,11 @@ def main() -> None:
         if old.get("settings") != settings:
             diff = [k for k in settings if old.get("settings", {}).get(k) != settings[k]]
             sys.exit(f"refusing to resume {out}: settings changed ({', '.join(diff)})")
-        blob["measurements"] = [m for m in old["measurements"] if m["role"] in args.roles]
+        # Keep every earlier measurement, including roles not asked for this
+        # time: resuming with --roles target must not drop the draft's.
+        blob["measurements"] = list(old["measurements"])
         done = {m["label"] for m in blob["measurements"]}
+    blob["meta"]["roles"] = sorted({m["role"] for m in blob["measurements"]})
 
     keys = [(k, caps) for k, caps in store.items()
             if caps and k.role in args.roles and k.label not in done]
@@ -314,6 +352,8 @@ def main() -> None:
             "rows_mean": statistics.mean(c.rows for c in caps),
             "n_inputs": len(caps), **m,
         })
+        if key.role not in blob["meta"]["roles"]:
+            blob["meta"]["roles"] = sorted(blob["meta"]["roles"] + [key.role])
         write(out, blob)
         spent.append(time.perf_counter() - t_key)
 
@@ -329,6 +369,11 @@ def main() -> None:
         if args.device.startswith("cuda") and i % 20 == 19:
             torch.cuda.empty_cache()
 
+    # "complete" covers the roles this run was asked for; meta.roles says
+    # which roles the file holds, so a target-only file cannot pass for a full one.
+    uncovered = [r for r in args.roles if r not in blob["meta"]["roles"]]
+    if uncovered and stop is None:
+        stop = f"no measurements for {', '.join(uncovered)}"
     blob["complete"] = stop is None
     blob["stopped_because"] = stop
     write(out, blob)
@@ -360,7 +405,16 @@ def main() -> None:
         if layer:
             print(f"  decoder layers   {len(layer)} checks, ratio "
                   f"{min(layer):.3f} .. {max(layer):.3f}")
-    print(f"\nnext:  python analyze.py <sweep.json> --clear {out}")
+    have = blob["meta"]["roles"]
+    if set(have) != {"draft", "target"}:
+        print(f"\nthis file holds {', '.join(have) or 'no'} measurements only; "
+              f"pass the file with the other model before it:")
+        print(f"next:  python analyze.py <sweep.json> --clear <other-role.json> {out}")
+    else:
+        print(f"\nnext:  python analyze.py <sweep.json> --clear {out}")
+    if args.gate and not run_gate(blob, out, roles=args.roles,
+                                  max_power_w=args.gate_max_w):
+        sys.exit(3)
 
 
 if __name__ == "__main__":

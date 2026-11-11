@@ -335,6 +335,120 @@ def test_measure_and_compose_end_to_end():
           + f"; {len(checks)} additivity checks")
 
 
+def _m(role, comp, rows, ms, layer=None, kv=None, rel=2.0):
+    """One hand-made measurement, energy at a flat 50 W."""
+    key = clear.Key(role, comp, layer, rows, 0 if kv is not None else None)
+    return {"label": key.label, "role": role, "component": comp, "layer": layer,
+            "rows": rows, "kv_bin": key.kv_bin, "kv_mean": kv,
+            "rows_mean": rows if rows is not None else 10,
+            "time_ms": ms, "energy_mj": ms * 50.0, "dynamic_mj": None,
+            "power_w": 50.0, "rel_std_pct": rel, "trials": 5, "ok": True,
+            "why": "", "meter_overhead_pct": 1.0}
+
+
+def _blob(role="target", mlp_q1_ms=0.4, quant="float16"):
+    """A two-layer model whose parts add up exactly, unless mlp q1 is changed."""
+    ms = [_m(role, "prefill", None, 20.0)]
+    for rows in (1, 2):
+        ms += [
+            _m(role, "forward", rows, 2 * 1.3 + 3.21, kv=100),
+            _m(role, "layer", rows, 1.3, layer=0, kv=100),
+            _m(role, "attn", rows, 0.7, layer=0, kv=100),
+            _m(role, "norm_in", rows, 0.1, layer=0),
+            _m(role, "norm_post", rows, 0.1, layer=0),
+            _m(role, "mlp", rows, mlp_q1_ms if rows == 1 else 0.4, layer=0),
+            _m(role, "embed", rows, 0.01), _m(role, "rope", rows, 0.1),
+            _m(role, "norm", rows, 0.1), _m(role, "lm_head", rows, 3.0),
+        ]
+    return {"kind": "clear",
+            "meta": {"n_layers": {role: 2}, "device": "test",
+                     "model_pair": {"key": "pair"}},
+            "settings": {"quant": quant, "draft_precision": "float16"},
+            "replay_check": {"total": len(ms), "mismatched": 0},
+            "measurements": ms}
+
+
+def test_gate_catches_a_part_slower_than_its_whole():
+    """The fp16 failure: mlp at rows=1 took longer alone than its whole layer.
+    The gate must pass a sound file, fail that one, and fail a missing role."""
+    good = clear.gate(_blob())
+    assert not good["problems"], f"sound file failed the gate: {good['problems']}"
+    assert not good["warnings"], f"sound file drew warnings: {good['warnings']}"
+
+    bad = clear.gate(_blob(mlp_q1_ms=2.3))
+    assert any("longer than the whole" in p for p in bad["problems"]), (
+        f"a 2.3 ms mlp inside a 1.3 ms layer got through: {bad['problems']}")
+    assert any("forward additivity" in p for p in bad["problems"]), (
+        f"additivity of ~1.65 got through: {bad['problems']}")
+    assert any("fewer rows cost more" in w for w in bad["warnings"]), (
+        f"q1 slower than q2 drew no warning: {bad['warnings']}")
+
+    half = clear.gate(_blob(), roles=["draft", "target"])
+    assert any("draft" in p for p in half["problems"]), (
+        f"a target-only file passed as draft+target: {half['problems']}")
+    print("  ok  sound file passes; slow part, bad additivity and missing role fail")
+
+
+def test_composed_total_carries_measurement_error():
+    """clear_stderr is the forward measurements' spread, weighted by how often
+    each is used; two totals built the same way differ by exactly nothing."""
+    costs = clear.Costs(_blob())
+    sweep = [{"strategy": "autoregressive", "new_tokens": 3,
+              "round_detail": [{"prefix_len": 10}, {"prefix_len": 11},
+                               {"prefix_len": 12}]}]
+    (rec,) = clear.compose(costs, sweep)
+    scale = 1.2533 * 0.02 / 5 ** 0.5
+    fwd, prefill_tok = (2 * 1.3 + 3.21) * 50.0, 20.0 * 50.0 / 10
+    want_total = (10 * prefill_tok + 2 * fwd) / 3
+    want_se = ((10 / 3 * prefill_tok * scale) ** 2 + (2 / 3 * fwd * scale) ** 2) ** 0.5
+    assert abs(rec["clear_per_token"] - want_total) < 1e-9 * want_total, (
+        f"total {rec['clear_per_token']} != {want_total}")
+    assert abs(rec["clear_stderr"] - want_se) < 1e-9 * want_se, (
+        f"stderr {rec['clear_stderr']} != {want_se}")
+    assert clear.diff_stderr(costs, rec, rec) == 0.0, "a total differs from itself"
+    print(f"  ok  {rec['clear_per_token']:.2f} +/- {rec['clear_stderr']:.2f} mJ/token")
+
+
+def test_merge_never_mixes_precisions_of_one_model():
+    """analyze.load_clear: a target-only fp16 file replaces an NF4 target
+    wholesale -- a key it lacks must not be filled in from NF4 -- while the
+    draft, fp16 in both, is kept."""
+    import json
+    import tempfile
+
+    import analyze
+
+    nf4 = _blob("target", quant="nf4")
+    nf4["measurements"] += _blob("draft")["measurements"]
+    nf4["meta"]["n_layers"]["draft"] = 2
+    fp16 = _blob("target", quant="float16")
+    dropped = fp16["measurements"].pop()["label"]          # a key fp16 lacks
+    for m in fp16["measurements"]:
+        m["time_ms"] *= 7
+
+    with tempfile.TemporaryDirectory() as d:
+        paths = []
+        for name, blob in (("nf4.json", nf4), ("fp16.json", fp16)):
+            paths.append(str(Path(d) / name))
+            Path(paths[-1]).write_text(json.dumps(blob))
+        merged = analyze.load_clear(paths)
+        same = analyze.load_clear([paths[0], paths[0]])
+
+    target = [m for m in merged["measurements"] if m["role"] == "target"]
+    assert len(target) == len(fp16["measurements"]), (
+        f"{len(target)} target measurements, the fp16 file has {len(fp16['measurements'])}")
+    assert dropped not in {m["label"] for m in target}, (
+        f"{dropped} is missing from the fp16 file but was filled in from NF4")
+    assert all(m in fp16["measurements"] for m in target), "an NF4 target value survived"
+    assert sum(m["role"] == "draft" for m in merged["measurements"]) == sum(
+        m["role"] == "draft" for m in nf4["measurements"]), "draft measurements lost"
+    assert merged["meta"]["precision"] == {"target": "float16", "draft": "float16"}, (
+        merged["meta"]["precision"])
+    assert len(same["measurements"]) == len(nf4["measurements"]), (
+        "merging a file with itself changed the measurement count")
+    print("  ok  fp16 target replaces NF4 target wholesale; fp16 draft kept")
+
+
 if __name__ == "__main__":
     tests = [
         ("capture shapes", test_capture_sees_engine_shapes),
@@ -346,6 +460,9 @@ if __name__ == "__main__":
         ("slow counter reads", test_slow_counter_reads_do_not_inflate_cost),
         ("default polling + meter check", test_default_polling_on_a_t4_like_counter),
         ("measure + compose", test_measure_and_compose_end_to_end),
+        ("gate", test_gate_catches_a_part_slower_than_its_whole),
+        ("error bars", test_composed_total_carries_measurement_error),
+        ("merge keeps precisions apart", test_merge_never_mixes_precisions_of_one_model),
     ]
     failed = 0
     for name, fn in tests:

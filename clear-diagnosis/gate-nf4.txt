@@ -1,0 +1,12 @@
+
+gate: previous/clear-qwen2.5-3b-nf4.json
+  roles measured:         draft, target
+  replays exact:          1395/1395
+  inside 10% bar:         375/375
+  metering overhead:      +2.6% median
+  part slower than whole: 0
+  forward additivity:     0.83 .. 1.03
+  layer additivity:       0.73 .. 0.94
+  !! layer additivity 0.73 .. 0.94, outside 0.8 .. 1.25: the component split is not yet trustworthy at this level
+
+  gate passed (with warnings)

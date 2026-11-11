@@ -1,0 +1,64 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+loading target Qwen/Qwen2.5-3B-Instruct  (float16)
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [00:30<00:30, 30.37s/it]Fetching 2 files: 100%|██████████| 2/2 [00:30<00:00, 15.19s/it]
+Loading weights:   0%|          | 0/434 [00:00<?, ?it/s]Loading weights:   0%|          | 1/434 [00:01<07:16,  1.01s/it]Loading weights:  34%|███▍      | 147/434 [00:01<00:01, 175.29it/s]Loading weights:  49%|████▉     | 213/434 [00:01<00:01, 171.55it/s]Loading weights:  59%|█████▉    | 256/434 [00:01<00:01, 165.92it/s]Loading weights:  67%|██████▋   | 289/434 [00:01<00:00, 170.38it/s]Loading weights:  73%|███████▎  | 317/434 [00:02<00:00, 158.20it/s]Loading weights:  78%|███████▊  | 340/434 [00:02<00:00, 163.23it/s]Loading weights:  84%|████████▎ | 363/434 [00:02<00:00, 167.00it/s]Loading weights:  88%|████████▊ | 384/434 [00:02<00:00, 172.62it/s]Loading weights:  93%|█████████▎| 404/434 [00:02<00:00, 160.90it/s]Loading weights:  97%|█████████▋| 423/434 [00:02<00:00, 162.65it/s]Loading weights: 100%|██████████| 434/434 [00:02<00:00, 152.18it/s]
+loading draft  Qwen/Qwen2.5-0.5B-Instruct  (float16)
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:   0%|          | 1/290 [00:00<01:10,  4.13it/s]Loading weights:  72%|███████▏  | 209/290 [00:00<00:00, 765.87it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 681.50it/s]
+Generating train split:   0%|          | 0/7473 [00:00<?, ? examples/s]Generating train split: 100%|██████████| 7473/7473 [00:00<00:00, 73825.01 examples/s]Generating train split: 100%|██████████| 7473/7473 [00:00<00:00, 73588.25 examples/s]
+Generating test split:   0%|          | 0/1319 [00:00<?, ? examples/s]Generating test split: 100%|██████████| 1319/1319 [00:00<00:00, 274364.56 examples/s]
+
+target of qwen2.5-3b (float16), layer 18 of 36, device Tesla T4
+
+=== target/mlp/L18
+
+  q1
+    captured input: shape (1, 1, 2048)  float16  strides (2048, 2048, 1)  offset 0  contiguous  |x| max 7.65
+    replay (what CLEAR amplifies)        0.553 ms
+    fresh contiguous input               0.553 ms
+    random input, same shape             0.553 ms
+    one at a time (sync per call)        0.593 ms
+    after a forward pass                 0.622 ms
+    in the pass (hooks)                  0.628 ms
+    whole forward pass                  47.479 ms
+    input seen in the pass: shape (1, 1, 2048)  float16  strides (2048, 2048, 1)  offset 0  contiguous
+    -> replay matches the pass
+
+  q2
+    captured input: shape (1, 2, 2048)  float16  strides (4096, 2048, 1)  offset 0  contiguous  |x| max 7.43
+    replay (what CLEAR amplifies)        0.580 ms
+    fresh contiguous input               0.581 ms
+    random input, same shape             0.581 ms
+    one at a time (sync per call)        0.627 ms
+    after a forward pass                 0.655 ms
+    in the pass (hooks)                  0.642 ms
+    whole forward pass                  43.442 ms
+    input seen in the pass: shape (1, 2, 2048)  float16  strides (4096, 2048, 1)  offset 0  contiguous
+    -> replay matches the pass
+
+=== target/lm_head   weight (151936, 2048) float16
+
+  q1
+    captured input: shape (1, 1, 2048)  float16  strides (2048, 2048, 1)  offset 0  contiguous  |x| max 125
+    replay (what CLEAR amplifies)        3.340 ms
+    fresh contiguous input               3.341 ms
+    random input, same shape             3.418 ms
+    one at a time (sync per call)        3.382 ms
+    after a forward pass                 2.489 ms
+    in the pass (hooks)                  2.502 ms
+    whole forward pass                  48.422 ms
+    input seen in the pass: shape (1, 1, 2048)  float16  strides (2048, 2048, 1)  offset 0  contiguous
+    -> replay is 1.3x the in-pass cost: compare the rows above to see which variant brings it back down
+
+  q2
+    captured input: shape (1, 2, 2048)  float16  strides (4096, 2048, 1)  offset 0  contiguous  |x| max 84.4
+    replay (what CLEAR amplifies)        2.528 ms
+    fresh contiguous input               2.528 ms
+    random input, same shape             2.527 ms
+    one at a time (sync per call)        2.576 ms
+    after a forward pass                 2.595 ms
+    in the pass (hooks)                  2.593 ms
+    whole forward pass                  45.542 ms
+    input seen in the pass: shape (1, 2, 2048)  float16  strides (4096, 2048, 1)  offset 0  contiguous
+    -> replay matches the pass
+
+Bring this output back with the gate's output; the header of this script says what each pattern means.

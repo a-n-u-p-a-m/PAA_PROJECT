@@ -74,6 +74,31 @@ cannot. What to check in its output:
   Far below 1 means a component is missing; far above means separately
   replayed parts each pay launch overhead that the real pass overlaps.
 
+`--gate` makes the run judge the file it just wrote and exit 3 if it is not
+fit to compose from; `kaggle_run.sh` passes it for both the quick check and
+the full pass, at whatever precision. To gate a file that already exists,
+with no model or GPU:
+
+```bash
+python run_clear.py --check results/clear-qwen2.5-3b-float16.json
+```
+
+The gate fails on: a replay mismatch, more than 10% of measurements outside
+the bar, metering overhead above 5%, forward additivity outside 0.8–1.25, a
+missing role, and **a part that takes longer replayed alone than the whole
+that contains it** (in ms, so it needs no counter). That last one is what
+the first fp16 pass tripped: the target MLP at rows=1 took 2.29 ms alone
+against 1.31 ms for its whole layer. It warns, without failing, when layer
+additivity leaves 0.8–1.25 or when fewer rows cost more than more rows. The
+total is built from forward measurements, so those do not corrupt E(K), but
+they do mean the component split is not yet trustworthy at that level.
+When a part is slower alone than in the pass, find out why before
+re-measuring:
+
+```bash
+python diagnose_replay.py --profile kaggle-t4 --quant float16
+```
+
 How amplification works, since it is the part most easily got wrong: each
 component first runs untimed for 1.5 s, so the GPU's power state belongs to
 it rather than to whatever ran before. A T4 stays high-power for a while
@@ -110,8 +135,16 @@ python analyze.py results/3b-fp16.json \
     --clear results/clear-qwen2.5-3b-nf4.json results/clear-qwen2.5-3b-float16.json
 ```
 
-Later files override earlier ones key by key, so this takes the draft from the
-NF4 file and the target from the fp16 one.
+Files merge per model. The fp16 file's target runs at a different precision
+from the NF4 file's, so it replaces the NF4 target wholesale, not key by key:
+a key the fp16 pass lacks is never filled in from NF4. The draft is fp16 in
+both and comes from the NF4 file. The report prints which file and precision
+each model was taken from. A target-only file records `meta.roles:
+["target"]` and cannot be composed alone; `analyze.py` says so instead of
+quietly producing a table.
+
+On Kaggle, `QUANT=float16 bash kaggle_run.sh` does all of this, gate
+included. If no NF4 pass is in `results/`, it measures both models.
 
 ### Packaging the results
 
@@ -134,6 +167,12 @@ CLEAR composition (mJ above idle per emitted token)
   target.mlp            ...
 ```
 
+- **+/-** is one standard error on the composed total, carried through from
+  each forward measurement's trial-to-trial spread. Totals at different K
+  share measurements, so the line under the table tests the *difference*
+  from the best K and lists every K within 2 s.e. of it. Quote that set, not
+  the single K, when the curve is flat. It is a lower bound: it leaves out
+  systematic error and prompt sampling.
 - **CLEAR/meas** near 1 means the composition accounts for the energy. Well
   below 1 means real work happens outside the forward passes (accept/reject,
   rollback, host-side glue), and the gap is a result worth reporting.
@@ -154,4 +193,5 @@ CLEAR composition (mJ above idle per emitted token)
 | first component after a heavy one reads high | power state carried over; raise `--settle-ms` |
 | `energy counter stopped updating` | NVML stalled; rerun with `--resume` |
 | small components look implausibly cheap | weights hot in L2 from back-to-back replay; compare a `--flush-l2` run |
+| gate: a part is slower alone than its whole | the replay runs a different kernel or memory path from the real pass; run `diagnose_replay.py` and do not use that row count until it is explained |
 | CLEAR/meas well above 1 | parts replayed alone each pay launch overhead; compare the additivity ratios |

@@ -4,12 +4,20 @@
 #
 #   !bash /kaggle/input/<dataset>/specdec/kaggle_run.sh           # quick, then full
 #   !bash /kaggle/input/<dataset>/specdec/kaggle_run.sh quick     # stop after quick
+#   !QUANT=float16 bash .../kaggle_run.sh                         # fp16 target
+#
+# QUANT picks the target precision (nf4, the default, or float16). The gate
+# always judges the file that run just wrote, whatever its precision. With
+# QUANT=float16 only the target is measured if an NF4 pass is already in
+# results/ (the draft is fp16 in both, so it is taken from there); otherwise
+# both models are measured.
 #
 # Whatever happens, it ends by packaging results/ into
 # /kaggle/working/clear-results-<time>.tar.gz, so there is always one file to
 # bring back. Safe to re-run: the full pass resumes where it stopped.
 
 MODE="${1:-full}"
+QUANT="${QUANT:-nf4}"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 WORK=/kaggle/working/specdec
 STAMP=$(date +%Y%m%d-%H%M)
@@ -46,52 +54,43 @@ python tests/test_clear.py > results/test-clear.log 2>&1 \
 say "environment probe"
 python probe_env.py --json results/env.json --text results/env.txt | tail -12
 
-say "CLEAR quick check"
-python run_clear.py --profile kaggle-t4 --quick 2>&1 | tee results/clear-quick.log
-[ "${PIPESTATUS[0]}" -eq 0 ] || { echo "quick run failed"; exit 1; }
+case "$QUANT" in
+    nf4)     SWEEP=results/3b-nf4.json;  ROLES="draft target" ;;
+    float16) SWEEP=results/3b-fp16.json; ROLES="draft target" ;;
+    *) echo "QUANT must be nf4 or float16, not '$QUANT'"; exit 1 ;;
+esac
+OUT=results/clear-qwen2.5-3b-$QUANT.json
+CLEAR_FILES="$OUT"
+NF4_PASS=results/clear-qwen2.5-3b-nf4.json
+if [ "$QUANT" = float16 ] && [ -f "$NF4_PASS" ]; then
+    ROLES="target"
+    CLEAR_FILES="$NF4_PASS $OUT"
+    echo "fp16 target only; draft measurements come from $NF4_PASS"
+fi
+# 75 W: nothing on a 70 W T4 can draw more, so a reading above it is wrong.
+COMMON="--profile kaggle-t4 --quant $QUANT --roles $ROLES --gate --gate-max-w 75"
 
-say "gate: is the measurement good enough for the full pass?"
-python - <<'EOF'
-import json, statistics, sys
-sys.path.insert(0, ".")
-from specdec.clear import Costs, additivity
-
-b = json.load(open("results/clear-qwen2.5-3b-nf4-quick.json"))
-ms = b["measurements"]
-problems = []
-if b["replay_check"]["mismatched"]:
-    problems.append(f"{b['replay_check']['mismatched']} replays did not reproduce")
-bad = [m["label"] for m in ms if not m["ok"]]
-if len(bad) > len(ms) * 0.1:
-    problems.append(f"{len(bad)}/{len(ms)} measurements outside the 10% bar")
-over = statistics.median(m.get("meter_overhead_pct", 0.0) for m in ms)
-if abs(over) > 5:
-    problems.append(f"metering adds {over:+.1f}% to call time")
-hot = [m["label"] for m in ms if (m.get("power_w") or 0) > 75]
-if hot:
-    problems.append(f"impossible power (>75 W on a 70 W card): {hot[:3]}")
-fwd = [c["ratio"] for c in additivity(Costs(b)) if c["check"].endswith("forward")]
-if not all(0.8 <= r <= 1.25 for r in fwd):
-    problems.append("forward additivity " + ", ".join(f"{r:.2f}" for r in fwd))
-
-print(f"  replays exact:          {b['replay_check']['total'] - b['replay_check']['mismatched']}/{b['replay_check']['total']}")
-print(f"  inside 10% bar:         {len(ms) - len(bad)}/{len(ms)}")
-print(f"  metering overhead:      {over:+.1f}% median")
-print(f"  forward additivity:     {min(fwd):.2f} .. {max(fwd):.2f}")
-if problems:
-    print("\n  GATE FAILED -- not starting the full pass:")
-    for p in problems:
-        print(f"    - {p}")
-    sys.exit(1)
-print("\n  gate passed")
-EOF
-GATE=$?
-[ "$GATE" -eq 0 ] || { echo "bring the archive back for a look"; exit 1; }
+say "CLEAR quick check ($QUANT, roles: $ROLES)"
+# --gate judges the file this run wrote and exits 3 if it is not good enough.
+python run_clear.py $COMMON --quick 2>&1 | tee "results/clear-quick-$QUANT.log"
+RC=${PIPESTATUS[0]}
+[ "$RC" -eq 3 ] && { echo "quick gate failed -- bring the archive back for a look"; exit 1; }
+[ "$RC" -eq 0 ] || { echo "quick run failed"; exit 1; }
 [ "$MODE" = "quick" ] && { say "quick mode: stopping here"; exit 0; }
 
 say "CLEAR full pass (~1.5-2 h; resumes if re-run)"
-python run_clear.py --profile kaggle-t4 --deadline 600m --resume 2>&1 | tee results/clear-full.log
+python run_clear.py $COMMON --deadline 600m --resume 2>&1 | tee "results/clear-full-$QUANT.log"
+RC=${PIPESTATUS[0]}
+[ "$RC" -eq 0 ] || [ "$RC" -eq 3 ] || { echo "full pass failed"; exit 1; }
 
 say "composing E(K) against the existing T4 sweep"
-python analyze.py results/3b-nf4.json --clear results/clear-qwen2.5-3b-nf4.json \
-    --csv results/clear-curve.csv 2>&1 | tee results/clear-analysis.txt
+if [ "$RC" -eq 3 ]; then
+    echo "!! THE FULL PASS FAILED ITS GATE. The tables below are for diagnosis only;"
+    echo "!! do not quote numbers from them."
+fi
+python analyze.py "$SWEEP" --clear $CLEAR_FILES \
+    --csv "results/clear-curve-$QUANT.csv" 2>&1 | tee "results/clear-analysis-$QUANT.txt"
+python analyze.py "$SWEEP" --clear $CLEAR_FILES --clear-metric time_ms 2>&1 \
+    | sed -n '/^CLEAR composition/,$p' > "results/clear-time-analysis-$QUANT.txt"
+echo "time composition written to results/clear-time-analysis-$QUANT.txt"
+[ "$RC" -eq 0 ] || exit 1

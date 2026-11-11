@@ -1,3 +1,7 @@
+# Two separate time compositions (--clear-metric time_ms), one per target precision.
+# The optimum under each table is the K with the lowest composed TIME per token.
+
+## fp16 target (sweep 3b-fp16.json; target forward at q1 = 48.7 ms)
 CLEAR composition (ms per emitted token)
     K      CLEAR   vs AR   draft%   measured  CLEAR/meas
   ------------------------------------------------------
@@ -11,7 +15,9 @@ CLEAR composition (ms per emitted token)
     7     45.155    0.91    82.1%     51.708        0.87
     8     46.671    0.95    83.9%     53.430        0.87
 
-  CLEAR energy-optimal K = 2
+  CLEAR time-optimal K = 2
+
+## NF4 target (sweep 3b-nf4.json)
 CLEAR composition (ms per emitted token)
     K      CLEAR   vs AR   draft%   measured  CLEAR/meas
   ------------------------------------------------------
@@ -25,6 +31,6 @@ CLEAR composition (ms per emitted token)
     7     54.247    0.72    71.5%     62.254        0.87
     8     55.322    0.73    74.4%     63.756        0.87
 
-  CLEAR energy-optimal K = 4
+  CLEAR time-optimal K = 4
 
 [exited with code 0]

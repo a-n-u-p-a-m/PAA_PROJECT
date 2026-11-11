@@ -1,0 +1,15 @@
+
+gate: previous/clear-qwen2.5-3b-float16.json
+  roles measured:         target
+  replays exact:          1395/1395
+  inside 10% bar:         307/307
+  metering overhead:      +2.8% median
+  part slower than whole: 3
+  forward additivity:     1.01 .. 2.13
+  layer additivity:       0.97 .. 2.01
+  !! fewer rows cost more than more rows: target/mlp/L0 q1 2.295 ms > q2 0.735 ms; target/mlp/L18 q1 2.301 ms > q2 0.705 ms; target/mlp/L35 q1 2.291 ms > q2 0.703 ms; target/lm_head q1 10.862 ms > q2 3.664 ms
+  !! layer additivity 0.97 .. 2.01, outside 0.8 .. 1.25: the component split is not yet trustworthy at this level
+
+  GATE FAILED -- do not compose from this file:
+    - a part replayed alone takes longer than the whole that contains it, so the replay is not the work the pass did: target/mlp/L0/q1 2.295 ms alone vs 1.311 ms for the whole layer; target/mlp/L18/q1 2.301 ms alone vs 1.310 ms for the whole layer; target/mlp/L35/q1 2.291 ms alone vs 1.294 ms for the whole layer
+    - forward additivity 1.01 .. 2.13, outside 0.8 .. 1.25

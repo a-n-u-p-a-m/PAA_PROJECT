@@ -317,28 +317,69 @@ def _sanity_check_idle(records, baseline, idle_w) -> None:
               f"'attached to physical GPU N' line in the run log.\n")
 
 
+def _clear_precision(blob: dict) -> dict:
+    """Precision each model ran at. Older files only have it in settings."""
+    prec = blob.get("meta", {}).get("precision")
+    if prec:
+        return prec
+    st = blob.get("settings", {})
+    return {"draft": st.get("draft_precision"), "target": st.get("quant")}
+
+
 def load_clear(paths: list[str]) -> dict:
     """Merge CLEAR files, e.g. a draft+target pass and a target-only pass.
 
-    Only measurements merge; a later file's label overrides an earlier one.
-    Energy from two files is comparable only if both ran on the same device.
+    Measurements merge per model. Labels carry no precision, so two files
+    may share a model's labels only when that model ran at the same
+    precision in both; then a later file's label overrides an earlier one.
+    When the precision differs, the later file replaces that model's
+    measurements wholesale, so a key it lacks can never be filled in from
+    the other precision. Energy from two files is comparable only if both
+    ran on the same device.
     """
-    merged: dict = {"meta": {"n_layers": {}, "device": set()}, "measurements": {}}
+    by_role: dict[str, dict] = {}
+    n_layers: dict = {}
+    devices: set = set()
+    pair_key = None
     for p in paths:
         with open(p) as fh:
             blob = json.load(fh)
         if blob.get("kind") != "clear":
             sys.exit(f"{p} is not a run_clear.py output")
-        merged["meta"]["n_layers"].update(blob["meta"]["n_layers"])
-        merged["meta"]["device"].add(blob["meta"].get("device"))
+        key = (blob["meta"].get("model_pair") or {}).get("key")
+        if pair_key and key and key != pair_key:
+            sys.exit(f"{p} measured {key}, the earlier CLEAR file(s) {pair_key}: "
+                     f"different models cannot be merged")
+        pair_key = pair_key or key
+        n_layers.update(blob["meta"]["n_layers"])
+        devices.add(blob["meta"].get("device"))
+        prec = _clear_precision(blob)
         for m in blob["measurements"]:
-            merged["measurements"][m["label"]] = m
-    if len(merged["meta"]["device"]) > 1:
+            role = m["role"]
+            slot = by_role.get(role)
+            if slot is not None and slot["precision"] != prec.get(role):
+                print(f"  CLEAR merge: {role} from {', '.join(slot['sources'])} "
+                      f"({slot['precision']}) replaced by {p} ({prec.get(role)})")
+                slot = None
+            if slot is None:
+                slot = by_role[role] = {"precision": prec.get(role), "sources": [],
+                                        "measurements": {}}
+            if p not in slot["sources"]:
+                slot["sources"].append(p)
+            slot["measurements"][m.get("label") or len(slot["measurements"])] = m
+    if len(devices) > 1:
         print(f"!! CLEAR files come from different devices "
-              f"{sorted(merged['meta']['device'])}; their energies cannot share a table")
-    merged["meta"]["device"] = ", ".join(sorted(d or "?" for d in merged["meta"]["device"]))
-    merged["measurements"] = list(merged["measurements"].values())
-    return merged
+              f"{sorted(d or '?' for d in devices)}; their energies cannot share a table")
+    return {
+        "kind": "clear",
+        "meta": {
+            "n_layers": n_layers,
+            "device": ", ".join(sorted(d or "?" for d in devices)),
+            "precision": {r: s["precision"] for r, s in by_role.items()},
+            "sources": {r: list(s["sources"]) for r, s in by_role.items()},
+        },
+        "measurements": [m for s in by_role.values() for m in s["measurements"].values()],
+    }
 
 
 def _measured_per_token(group: list[dict], metric: str, idle_w):
@@ -367,21 +408,32 @@ def clear_report(rows: list[dict], blob: dict, meta: dict,
     happens outside the measured forward passes.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from specdec.clear import Costs, compose
+    from specdec.clear import Costs, compose, diff_stderr
 
     costs = Costs(blob, metric)
-    curve = compose(costs, rows)
+    try:
+        curve = compose(costs, rows)
+    except KeyError as exc:
+        have = sorted({m["role"] for m in blob["measurements"]})
+        sys.exit(f"\nCLEAR composition impossible: {exc.args[0]}.\n"
+                 f"The CLEAR file(s) hold {', '.join(have) or 'no'} measurements. "
+                 f"A target-only pass composes only together with a file that has "
+                 f"the draft:  --clear <draft+target.json> <target-only.json>")
     unit = costs.unit
+    what = "time" if costs.metric == "time_ms" else "energy"
     by: dict[str, list[dict]] = {}
     for r in rows:
         by.setdefault(r["strategy"], []).append(r)
 
     print(f"\nCLEAR composition ({unit} per emitted token)")
+    for role, srcs in sorted((blob["meta"].get("sources") or {}).items()):
+        print(f"  {role:<6} {(blob['meta'].get('precision') or {}).get(role) or '?':<8} "
+              f"from {', '.join(srcs)}")
     if blob["meta"]["device"] != meta.get("device") and costs.metric != "time_ms":
         print(f"  !! components measured on {blob['meta']['device']}, sweep ran on "
               f"{meta.get('device')}: the call counts carry over, the CLEAR/measured "
               f"column does not")
-    head = (f"  {'K':>3}  {'CLEAR':>9}  {'vs AR':>6}  {'draft%':>7}  "
+    head = (f"  {'K':>3}  {'CLEAR':>9}  {'+/-':>7}  {'vs AR':>6}  {'draft%':>7}  "
             f"{'measured':>9}  {'CLEAR/meas':>10}")
     print(head)
     print("  " + "-" * (len(head) - 2))
@@ -392,7 +444,7 @@ def clear_report(rows: list[dict], blob: dict, meta: dict,
         meas = _measured_per_token(by[c["strategy"]], costs.metric, meta.get("idle_watts"))
         c["measured_per_token"] = meas
         k = "AR" if c["strategy"] == "autoregressive" else (c["k"] or "~")
-        print(f"  {k:>3}  {c['clear_per_token']:>9.3f}  "
+        print(f"  {k:>3}  {c['clear_per_token']:>9.3f}  {c['clear_stderr']:>7.3f}  "
               f"{fmt(c['clear_per_token'] / ar['clear_per_token'] if ar else None, '>6.2f')}  "
               f"{d / c['clear_per_token'] * 100:>6.1f}%  {fmt(meas, '>9.3f')}  "
               f"{fmt(c['clear_per_token'] / meas if meas else None, '>10.2f')}")
@@ -400,7 +452,17 @@ def clear_report(rows: list[dict], blob: dict, meta: dict,
     ks = [c for c in curve if c["k"] is not None]
     if ks:
         best = min(ks, key=lambda c: c["clear_per_token"])
-        print(f"\n  CLEAR energy-optimal K = {best['k']}")
+        # Totals at different K share forward measurements, so the test is on
+        # the difference, where the shared part of the error cancels.
+        tied = [c["k"] for c in ks
+                if c["clear_per_token"] - best["clear_per_token"]
+                <= 2 * diff_stderr(costs, c, best)]
+        print(f"\n  CLEAR {what}-optimal K = {best['k']}   "
+              f"within 2 s.e. of it: K={tied}")
+        print("  +/- is one standard error from trial-to-trial repeatability of the "
+              "forward\n  measurements. It leaves out systematic error (one captured "
+              "input per key,\n  context interpolation) and prompt sampling, so it is "
+              "a lower bound.")
 
     parts = sorted({k for c in curve for k in c["breakdown"]},
                    key=lambda k: (k.split(".")[0] != "draft", k))
@@ -424,11 +486,12 @@ def write_csv(records: list[dict], path: str, curve: list[dict] | None = None) -
         for r in records:
             c = by.get(r["strategy"])
             r["clear_per_token"] = c["clear_per_token"] if c else None
+            r["clear_stderr"] = c["clear_stderr"] if c else None
     fields = ["strategy", "k", "constant_k", "mean_draft_length", "acceptance_rate",
               "tokens_per_round", "tokens_per_s", "draft_share",
               "draft_tokens_per_output_token", "energy_mj",
               "energy_per_token_mj", "dynamic_mj", "dynamic_per_token_mj",
-              "n_prompts"] + (["clear_per_token"] if curve else [])
+              "n_prompts"] + (["clear_per_token", "clear_stderr"] if curve else [])
     with open(path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
