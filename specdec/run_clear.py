@@ -80,6 +80,14 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--config", default=DEFAULT_PAIR, choices=sorted(MODEL_PAIRS))
     ap.add_argument("--quant", default="nf4", choices=["nf4", "float16", "bfloat16", "float32"])
     ap.add_argument("--compute-dtype", default="float16", choices=["float16", "bfloat16"])
+    ap.add_argument("--nf4-unquantized-dtype", default="compute",
+                    choices=["compute", "checkpoint"],
+                    help="dtype for the modules bitsandbytes leaves alone under "
+                         "--quant nf4, lm_head above all. 'compute' matches "
+                         "--compute-dtype (right: a bf16 lm_head is 4.6x slower "
+                         "than fp16 on a T4 from two logit rows up). 'checkpoint' "
+                         "keeps the weights' own dtype, reproducing the older "
+                         "behaviour the committed NF4 sweep ran under")
     ap.add_argument("--draft-precision", default="float16",
                     choices=["float16", "bfloat16", "float32"])
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -364,7 +372,8 @@ def main() -> None:
     settings = {k: getattr(args, k) for k in (
         "config", "quant", "draft_precision", "compute_dtype", "dataset", "limit",
         "seed", "max_new_tokens", "k", "layers", "kv_bin", "per_key", "trials",
-        "window_factor", "min_window_ms", "settle_ms", "flush_l2", "synthetic")}
+        "window_factor", "min_window_ms", "settle_ms", "flush_l2", "synthetic",
+        "nf4_unquantized_dtype")}
     # Bumped whenever the measurement procedure changes, so --resume refuses
     # to mix numbers made two different ways in one file. Rev 2: empty_cache
     # before each pilot, and a second pilot after the settle window.

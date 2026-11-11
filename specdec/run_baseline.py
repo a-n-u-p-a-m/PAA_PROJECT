@@ -108,6 +108,23 @@ def load_pair(pair: ModelPair, args) -> tuple:
     target_kw: dict = {}
     if args.quant == "nf4":
         target_kw["quantization_config"] = build_quant_config("nf4", args.compute_dtype)
+        # Say the dtype here too, or every module bitsandbytes does not convert
+        # keeps the checkpoint's -- and Qwen2.5 ships bfloat16. lm_head is such
+        # a module: Qwen2.5-3B ties it to its embeddings, so it is never
+        # quantized. A T4 (sm_75) has no bf16 tensor cores, and a bf16 lm_head
+        # GEMM measured 4.6x the fp16 one from two rows up (11.7 ms vs 2.5),
+        # while at one row both are a memory-bound 2.5 ms. Every verify call
+        # keeps K+1 logit rows and paid that; the one-row autoregressive
+        # baseline did not, so it penalised speculative decoding only, and
+        # hardest at low K where verify fires most often per token. It cost
+        # the T4 NF4 sweep ~4% of its speedup. Match the compute dtype.
+        #
+        # "checkpoint" reproduces that older behaviour, which the committed
+        # 9.5 h NF4 sweep ran: a CLEAR pass meant to compose against it has
+        # to be measured the same way, or the composition describes a model
+        # that never ran. analyze.py compares the two and says so.
+        if getattr(args, "nf4_unquantized_dtype", "compute") == "compute":
+            target_kw["dtype"] = _dtype(args.compute_dtype)
     else:
         target_kw["dtype"] = _dtype(args.quant)
 
@@ -379,6 +396,14 @@ def main() -> None:
                     choices=["float16", "bfloat16"],
                     help="NF4 compute dtype; keep float16 unless every device in "
                          "the comparison has native bf16")
+    ap.add_argument("--nf4-unquantized-dtype", default="compute",
+                    choices=["compute", "checkpoint"],
+                    help="dtype for the modules bitsandbytes leaves alone under "
+                         "--quant nf4, lm_head above all. 'compute' matches "
+                         "--compute-dtype (right: a bf16 lm_head is 4.6x slower "
+                         "than fp16 on a T4 from two logit rows up). 'checkpoint' "
+                         "keeps the weights' own dtype, reproducing the older "
+                         "behaviour the committed NF4 sweep ran under")
     ap.add_argument("--draft-precision", default="float16",
                     choices=["float16", "bfloat16", "float32"])
 
@@ -479,6 +504,10 @@ def main() -> None:
             "config": args.config, "quant": args.quant,
             "draft_precision": args.draft_precision,
             "compute_dtype": args.compute_dtype,
+            # Changes what lm_head runs at under NF4, so it changes the rows.
+            # Its absence in an older file means "checkpoint"; see
+            # analyze.py's _nf4_dtype_of.
+            "nf4_unquantized_dtype": args.nf4_unquantized_dtype,
             "dataset": args.dataset, "limit": args.limit, "seed": args.seed,
             "max_new_tokens": args.max_new_tokens, "sample": args.sample,
             "temperature": args.temperature, "top_p": args.top_p,

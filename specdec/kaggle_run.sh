@@ -61,17 +61,24 @@ say "environment probe"
 python probe_env.py --json results/env.json --text results/env.txt | tail -12
 
 case "$QUANT" in
-    nf4)     SWEEP=results/3b-nf4.json;  ROLES="draft target" ;;
-    float16) SWEEP=results/3b-fp16.json; ROLES="draft target" ;;
+    nf4)     SWEEP=results/3b-nf4.json;  OTHER=float16 ;;
+    float16) SWEEP=results/3b-fp16.json; OTHER=nf4 ;;
     *) echo "QUANT must be nf4 or float16, not '$QUANT'"; exit 1 ;;
 esac
+ROLES="draft target"
 OUT=results/clear-qwen2.5-3b-$QUANT.json
 CLEAR_FILES="$OUT"
-NF4_PASS=results/clear-qwen2.5-3b-nf4.json
-if [ "$QUANT" = float16 ] && [ -f "$NF4_PASS" ]; then
+# The draft is fp16 whichever precision the target runs at, so once either
+# precision has been measured its draft carries over and the next one needs
+# only the target -- roughly half the work. Either direction: it does not
+# matter which precision came first. analyze.py is given the other pass
+# before this one, so this run's target replaces the other's wholesale
+# while the shared draft is kept.
+OTHER_PASS=results/clear-qwen2.5-3b-$OTHER.json
+if [ -f "$OTHER_PASS" ]; then
     ROLES="target"
-    CLEAR_FILES="$NF4_PASS $OUT"
-    echo "fp16 target only; draft measurements come from $NF4_PASS"
+    CLEAR_FILES="$OTHER_PASS $OUT"
+    echo "$QUANT target only; draft measurements come from $OTHER_PASS"
 fi
 # 75 W: nothing on a 70 W T4 can draw more, so a reading above it is wrong.
 COMMON="--profile kaggle-t4 --quant $QUANT --roles $ROLES --gate --gate-max-w 75"

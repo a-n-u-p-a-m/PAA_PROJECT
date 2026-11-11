@@ -53,6 +53,11 @@ def load(paths: list[str]) -> tuple[list[dict], dict]:
             for k in ("model_pair", "device", "dataset", "protocol_deviations",
                       "peak_vram_gb", "offline_data", "idle_watts")
         }
+        # Carried so clear_report can check that the components were measured
+        # on the same model this sweep ran. Absent in files written before the
+        # setting existed, which is what _nf4_dtype_of takes to mean
+        # "checkpoint".
+        meta.setdefault("settings", blob.get("settings") or {})
         rows.extend(blob["rows"])
     return rows, meta
 
@@ -326,6 +331,20 @@ def _clear_precision(blob: dict) -> dict:
     return {"draft": st.get("draft_precision"), "target": st.get("quant")}
 
 
+def _nf4_dtype_of(settings: dict) -> str:
+    """What dtype NF4's unquantized modules ran at, for one sweep or pass.
+
+    Only NF4 has the question: bitsandbytes leaves some modules alone, and
+    unless ``from_pretrained`` is told a dtype they keep the checkpoint's.
+    Any file written before this was recorded ran that way, so absent means
+    "checkpoint". Anything other than NF4 sets its dtype outright and is
+    never ambiguous.
+    """
+    if settings.get("quant") != "nf4":
+        return settings.get("quant") or "?"
+    return settings.get("nf4_unquantized_dtype") or "checkpoint"
+
+
 def load_clear(paths: list[str]) -> dict:
     """Merge CLEAR files, e.g. a draft+target pass and a target-only pass.
 
@@ -433,6 +452,15 @@ def clear_report(rows: list[dict], blob: dict, meta: dict,
         print(f"  !! components measured on {blob['meta']['device']}, sweep ran on "
               f"{meta.get('device')}: the call counts carry over, the CLEAR/measured "
               f"column does not")
+    sweep_dt, clear_dt = (_nf4_dtype_of(meta.get("settings") or {}),
+                          _nf4_dtype_of(blob.get("settings") or {}))
+    if sweep_dt != clear_dt:
+        print(f"  !! the sweep left NF4's unquantized modules in '{sweep_dt}' dtype "
+              f"and the components\n     were measured in '{clear_dt}'. lm_head is "
+              f"such a module, and bf16 vs fp16\n     changes it by 4.6x on a T4 "
+              f"from two logit rows up -- so this composition\n     describes a "
+              f"model that never ran. Re-measure with "
+              f"--nf4-unquantized-dtype {sweep_dt}.")
     head = (f"  {'K':>3}  {'CLEAR':>9}  {'+/-':>7}  {'vs AR':>6}  {'draft%':>7}  "
             f"{'measured':>9}  {'CLEAR/meas':>10}")
     print(head)

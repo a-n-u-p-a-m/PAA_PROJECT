@@ -262,6 +262,14 @@ def main() -> None:
     ap.add_argument("--quant", default="float16",
                     choices=["nf4", "float16", "bfloat16", "float32"])
     ap.add_argument("--compute-dtype", default="float16", choices=["float16", "bfloat16"])
+    ap.add_argument("--nf4-unquantized-dtype", default="compute",
+                    choices=["compute", "checkpoint"],
+                    help="dtype for the modules bitsandbytes leaves alone under "
+                         "--quant nf4, lm_head above all. 'compute' matches "
+                         "--compute-dtype (right: a bf16 lm_head is 4.6x slower "
+                         "than fp16 on a T4 from two logit rows up). 'checkpoint' "
+                         "keeps the weights' own dtype, reproducing the older "
+                         "behaviour the committed NF4 sweep ran under")
     ap.add_argument("--draft-precision", default="float16",
                     choices=["float16", "bfloat16", "float32"])
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
