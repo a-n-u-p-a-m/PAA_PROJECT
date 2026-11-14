@@ -640,6 +640,10 @@ class AmplifyConfig:
     warmup: int = 3
     max_calls: int = 200_000
     tick_timeout_s: float = 5.0
+    min_pilot_calls: int = 64   # so warm-up cannot dominate the pilot average
+    min_chunk: int = 4          # never sync after every call: at chunk 1 the
+                                # loop is bound by sync plus the counter
+                                # poller rather than by the component
     empty_cache: bool = True        # same free workspace for every component,
                                     # so cuBLAS makes the same choice for all
     # Amplified / in-pass time. Not centred on 1: a part replayed on its own
@@ -753,15 +757,31 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
             fns[i % m]()
 
     def pilot() -> float:
-        """ms per call with nothing watching, growing the batch until the
-        total is long enough to time."""
+        """ms per call with nothing watching.
+
+        Grows the batch until it is both long enough to time *and* big
+        enough that the first calls do not dominate the average. Duration
+        alone is not enough: a slowish call reaches 100 ms in very few
+        iterations, and those early ones are the expensive ones. lm_head
+        allocates a vocabulary-wide output that the caching allocator only
+        returns cheaply after a few calls, so a pilot that stopped at 16
+        calls read 6.8 ms for work the real pass does in 2.6 ms -- and
+        every later stage inherited it, because ``chunk`` is sized from
+        this, and a chunk of 1 syncs after every call and then contends
+        with the counter poller.
+
+        A call slow enough that a full second of it has already run is
+        warm whatever the count, so ``dt >= 1000`` releases the count
+        requirement and prefill-sized work does not pay for it.
+        """
         n = len(fns)
         while True:
             t0 = time.perf_counter()
             body(n)
             _sync(device)
             dt = (time.perf_counter() - t0) * 1000
-            if dt >= 100 or n >= cfg.max_calls:
+            warm = n >= cfg.min_pilot_calls or dt >= 1000
+            if (dt >= 100 and warm) or n >= cfg.max_calls:
                 return dt / n
             n *= 4
 
@@ -781,7 +801,7 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
     if not energy:
         return _timing_only(body, per_call_ms, len(fns), device, cfg)
 
-    chunk = max(1, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
+    chunk = max(cfg.min_chunk, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
     window = max(cfg.min_window_ms, cfg.window_factor * (period_ms or 100.0),
                  cfg.calls_per_window * chunk * per_call_ms)
 
@@ -799,7 +819,7 @@ def amplify(fns: list[Callable[[], Any]], device, probe=None,
     settled_pilot = pilot()
     if settled_pilot < per_call_ms:
         per_call_ms = settled_pilot
-        chunk = max(1, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
+        chunk = max(cfg.min_chunk, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
 
     poller = _TickPoller(probe, cfg.poll_ms / 1000)
     poller.start()

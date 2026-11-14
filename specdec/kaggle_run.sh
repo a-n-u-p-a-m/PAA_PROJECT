@@ -92,8 +92,22 @@ say "CLEAR quick check ($QUANT, roles: $ROLES, $REPEAT fresh processes)"
 python run_clear.py $COMMON --quick --repeat "$REPEAT" 2>&1 \
     | tee "results/clear-quick-$QUANT.log"
 RC=${PIPESTATUS[0]}
-[ "$RC" -eq 3 ] && { echo "quick gate failed -- bring the archive back for a look"; exit 1; }
-[ "$RC" -eq 0 ] || { echo "quick run failed"; exit 1; }
+if [ "$RC" -eq 3 ]; then
+    # The gate exists to stop a bad file being composed from, not to stop the
+    # measuring. When its complaints are already known and understood -- as
+    # the lm_head anchor and the forward additivity shortfall are -- aborting
+    # here only means a session spent and no data to judge from.
+    if [ "${QUICK_GATE:-block}" = warn ]; then
+        say "quick gate failed, QUICK_GATE=warn -- measuring anyway; the full
+     pass is gated too and analyze.py refuses to compose from a bad file"
+    else
+        echo "quick gate failed -- bring the archive back for a look."
+        echo "Set QUICK_GATE=warn to measure anyway when the failures are known."
+        exit 1
+    fi
+elif [ "$RC" -ne 0 ]; then
+    echo "quick run failed"; exit 1
+fi
 [ "$MODE" = "quick" ] && { say "quick mode: stopping here"; exit 0; }
 
 say "CLEAR full pass (~1.5-2 h; resumes if re-run)"

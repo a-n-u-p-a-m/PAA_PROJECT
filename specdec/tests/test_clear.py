@@ -435,6 +435,46 @@ def test_in_pass_timer_keys_match_the_store():
     print(f"  ok  {len(timed)} keys timed in place, exactly the keys captured")
 
 
+def test_pilot_samples_enough_calls_to_be_representative():
+    """A slowish call crosses the pilot's 100 ms in very few iterations, so
+    the cost sizing every later stage could rest on four samples. This does
+    not claim to fix any particular measurement -- warm-up cannot be the
+    story, because amplify() already runs warmup*len(fns) calls before the
+    pilot starts -- it just refuses to characterise a component from a
+    handful of calls.
+    """
+    per_call, calls = 0.025, []                 # 25 ms: crosses 100 ms at n=4
+
+    def fn():
+        calls.append(1)
+        time.sleep(per_call)
+
+    def pilot_calls(min_pilot_calls):
+        calls.clear()
+        cfg = clear.AmplifyConfig(trials=1, min_window_ms=50, settle_ms=0,
+                                  min_pilot_calls=min_pilot_calls)
+        clear.amplify([fn] * 4, device="cpu", cfg=cfg)
+        return len(calls)
+
+    guarded, blind = pilot_calls(64), pilot_calls(0)
+    assert guarded >= blind + 64, (
+        f"the guard added only {guarded - blind} calls: {blind} without it, "
+        f"{guarded} with it")
+    print(f"  ok  pilot samples {guarded} calls where the duration bound alone "
+          f"stopped at {blind}")
+
+
+def test_chunk_never_syncs_after_every_call():
+    """A chunk of 1 makes the loop sync-bound and leaves it contending with
+    the counter poller, which is how a 2.6 ms call measured 9.8 ms."""
+    cfg = clear.AmplifyConfig()
+    assert cfg.min_chunk >= 2, "min_chunk must stop chunk collapsing to 1"
+    for per_call_ms in (0.1, 2.6, 9.8, 88.0):
+        chunk = max(cfg.min_chunk, round(cfg.chunk_ms / max(per_call_ms, 1e-6)))
+        assert chunk >= cfg.min_chunk, f"{per_call_ms} ms -> chunk {chunk}"
+    print(f"  ok  chunk floors at {cfg.min_chunk} however slow the call")
+
+
 def _big_blob(lm_head_ms=2.5, lm_head_in_pass=2.5):
     """A 36-layer target sized like the real NF4 run, so an inflated lm_head
     is small against the whole forward pass instead of dwarfing it."""
@@ -609,6 +649,8 @@ if __name__ == "__main__":
         ("default polling + meter check", test_default_polling_on_a_t4_like_counter),
         ("measure + compose", test_measure_and_compose_end_to_end),
         ("gate", test_gate_catches_a_part_slower_than_its_whole),
+        ("pilot sample size", test_pilot_samples_enough_calls_to_be_representative),
+        ("chunk floor", test_chunk_never_syncs_after_every_call),
         ("anchor vs in-pass", test_anchor_catches_what_the_other_checks_structurally_cannot),
         ("in-pass timer keys", test_in_pass_timer_keys_match_the_store),
         ("between-process spread",

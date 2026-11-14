@@ -35,6 +35,7 @@ import json
 import statistics
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def mean(xs):
@@ -54,10 +55,20 @@ def load(paths: list[str]) -> tuple[list[dict], dict]:
                       "peak_vram_gb", "offline_data", "idle_watts")
         }
         # Carried so clear_report can check that the components were measured
-        # on the same model this sweep ran. Absent in files written before the
-        # setting existed, which is what _nf4_dtype_of takes to mean
-        # "checkpoint".
-        meta.setdefault("settings", blob.get("settings") or {})
+        # on the same model this sweep ran. run_baseline.py keeps settings in
+        # a .meta.json sidecar rather than in the sweep itself, so look there
+        # too -- reading {} here and a real precision from the CLEAR file
+        # would make every composition look like a mismatch.
+        settings = blob.get("settings") or {}
+        if not settings:
+            side = Path(p).with_suffix("")
+            side = side.with_name(side.name + ".meta.json")
+            if side.exists():
+                try:
+                    settings = (json.loads(side.read_text()) or {}).get("settings") or {}
+                except (OSError, json.JSONDecodeError):
+                    settings = {}
+        meta.setdefault("settings", settings)
         rows.extend(blob["rows"])
     return rows, meta
 
@@ -331,17 +342,25 @@ def _clear_precision(blob: dict) -> dict:
     return {"draft": st.get("draft_precision"), "target": st.get("quant")}
 
 
-def _nf4_dtype_of(settings: dict) -> str:
+def _nf4_dtype_of(settings: dict) -> Optional[str]:
     """What dtype NF4's unquantized modules ran at, for one sweep or pass.
 
     Only NF4 has the question: bitsandbytes leaves some modules alone, and
     unless ``from_pretrained`` is told a dtype they keep the checkpoint's.
-    Any file written before this was recorded ran that way, so absent means
-    "checkpoint". Anything other than NF4 sets its dtype outright and is
-    never ambiguous.
+    A file that records ``quant`` but not this one ran before the setting
+    existed, so it ran that way: "checkpoint". Anything other than NF4 sets
+    its dtype outright and is never ambiguous.
+
+    Returns None when the file records no precision at all. That is not a
+    mismatch, it is an absence, and the caller must not compare it with
+    anything -- a sweep whose sidecar is missing would otherwise look like
+    it disagreed with every CLEAR file.
     """
-    if settings.get("quant") != "nf4":
-        return settings.get("quant") or "?"
+    quant = settings.get("quant")
+    if not quant:
+        return None
+    if quant != "nf4":
+        return quant
     return settings.get("nf4_unquantized_dtype") or "checkpoint"
 
 
@@ -454,7 +473,7 @@ def clear_report(rows: list[dict], blob: dict, meta: dict,
               f"column does not")
     sweep_dt, clear_dt = (_nf4_dtype_of(meta.get("settings") or {}),
                           _nf4_dtype_of(blob.get("settings") or {}))
-    if sweep_dt != clear_dt:
+    if sweep_dt and clear_dt and sweep_dt != clear_dt:
         print(f"  !! the sweep left NF4's unquantized modules in '{sweep_dt}' dtype "
               f"and the components\n     were measured in '{clear_dt}'. lm_head is "
               f"such a module, and bf16 vs fp16\n     changes it by 4.6x on a T4 "
