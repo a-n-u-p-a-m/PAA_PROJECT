@@ -1,10 +1,11 @@
 {
-  "fingerprint": "2be8b7af32f05168",
+  "fingerprint": "0c52fbc1770e6acd",
   "settings": {
     "config": "qwen2.5-3b",
     "quant": "nf4",
     "draft_precision": "float16",
     "compute_dtype": "float16",
+    "nf4_unquantized_dtype": "compute",
     "dataset": "gsm8k",
     "limit": null,
     "seed": 42,
@@ -26,5 +27,5 @@
     "baseline": true,
     "repeats": 1
   },
-  "created": "2026-10-13T07:13:39"
+  "created": "2026-11-14T12:19:22"
 }
