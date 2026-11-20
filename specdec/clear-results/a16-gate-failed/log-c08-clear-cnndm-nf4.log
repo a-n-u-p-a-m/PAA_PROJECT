@@ -1,0 +1,719 @@
+loading target Qwen/Qwen2.5-3B-Instruct  (nf4)
+Loading weights:   0%|          | 0/434 [00:00<?, ?it/s]Loading weights:   0%|          | 1/434 [00:00<02:13,  3.25it/s]Loading weights:   1%|          | 4/434 [00:00<00:37, 11.61it/s]Loading weights:   4%|▍         | 17/434 [00:00<00:09, 46.23it/s]Loading weights:   9%|▉         | 39/434 [00:00<00:04, 91.51it/s]Loading weights:  12%|█▏        | 52/434 [00:00<00:03, 98.91it/s]Loading weights:  15%|█▍        | 65/434 [00:00<00:03, 105.79it/s]Loading weights:  20%|██        | 87/434 [00:00<00:02, 131.39it/s]Loading weights:  23%|██▎       | 101/434 [00:01<00:02, 122.66it/s]Loading weights:  28%|██▊       | 123/434 [00:01<00:02, 141.74it/s]Loading weights:  32%|███▏      | 138/434 [00:01<00:02, 132.42it/s]Loading weights:  37%|███▋      | 159/434 [00:01<00:01, 146.01it/s]Loading weights:  40%|████      | 174/434 [00:01<00:01, 135.56it/s]Loading weights:  45%|████▍     | 195/434 [00:01<00:01, 148.09it/s]Loading weights:  49%|████▊     | 211/434 [00:01<00:01, 139.44it/s]Loading weights:  53%|█████▎    | 231/434 [00:01<00:01, 147.08it/s]Loading weights:  57%|█████▋    | 246/434 [00:02<00:01, 134.77it/s]Loading weights:  62%|██████▏   | 267/434 [00:02<00:01, 144.93it/s]Loading weights:  65%|██████▍   | 282/434 [00:02<00:01, 132.59it/s]Loading weights:  70%|██████▉   | 303/434 [00:02<00:00, 142.63it/s]Loading weights:  73%|███████▎  | 318/434 [00:02<00:00, 130.95it/s]Loading weights:  78%|███████▊  | 339/434 [00:02<00:00, 141.78it/s]Loading weights:  82%|████████▏ | 354/434 [00:02<00:00, 130.68it/s]Loading weights:  86%|████████▋ | 375/434 [00:03<00:00, 141.79it/s]Loading weights:  90%|████████▉ | 390/434 [00:03<00:00, 130.68it/s]Loading weights:  95%|█████████▍| 411/434 [00:03<00:00, 141.58it/s]Loading weights:  98%|█████████▊| 426/434 [00:03<00:00, 130.05it/s]Loading weights: 100%|██████████| 434/434 [00:03<00:00, 125.24it/s]
+loading draft  Qwen/Qwen2.5-0.5B-Instruct  (float16)
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:  55%|█████▍    | 159/290 [00:00<00:00, 1587.84it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 1888.92it/s]
+NVML energy counter on physical GPU 0
+  counter updates every 100 ms; idle draw 27.0 W
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+1. capture: 8 cnndm prompts x K=[1, 2, 3, 4, 5, 6, 7, 8] + autoregressive, 256 tokens; layers draft [0, 12, 23], target [0, 18, 35]
+  prompt 1/8 (467 tokens) -> 298 keys, 65 s
+  prompt 2/8 (944 tokens) -> 452 keys, 145 s
+  prompt 3/8 (896 tokens) -> 452 keys, 218 s
+  prompt 4/8 (1495 tokens) -> 606 keys, 301 s
+  prompt 5/8 (989 tokens) -> 606 keys, 364 s
+  prompt 6/8 (404 tokens) -> 606 keys, 401 s
+  prompt 7/8 (324 tokens) -> 683 keys, 451 s
+  prompt 8/8 (162 tokens) -> 760 keys, 495 s
+
+1b. in-pass timing: 1 prompt(s) at K=[1, 2, 3, 4, 5, 6, 7, 8], every component timed by events where it actually runs
+  298 keys timed in place, 63 s
+
+2. replay check
+  2770/2770 replays reproduce their output exactly
+
+2b. meter check: does reading the counter change the reading?
+  reference                      poll  reads/s  idle W      W    mJ/call  ms/call    rsd
+  draft/forward/q2/kv3            2ms      211    28.8   43.3    952.802   21.982   0.6%
+  draft/forward/q2/kv3           20ms       44    27.9   43.0    936.005   21.707   0.5%
+  draft/forward/q2/kv3          100ms       10    27.9   42.8    927.479   21.672   1.0%
+  target/attn/L0/q2/kv3           2ms      211    28.5   39.5     27.136    0.688   3.2%
+  target/attn/L0/q2/kv3          20ms       44    27.7   39.7     25.055    0.631   0.6%
+  target/attn/L0/q2/kv3         100ms       10    27.6   40.1     25.262    0.630   0.1%
+
+3. amplify 760 keys, 1.5 s settle + 5 tick-aligned trials of >=1998 ms each: roughly 158 min
+  [   1/760] draft/forward/q1/kv1                  821.883 mJ/call    18.807 ms   43.7 W  meter  +0.6%  N=122    rsd 0.7%  
+  [   2/760] draft/forward/q1/kv2                  837.377 mJ/call    19.140 ms   43.8 W  meter  +0.4%  N=121    rsd 0.2%  
+  [   3/760] draft/forward/q1/kv3                  843.874 mJ/call    19.324 ms   43.7 W  meter  +2.0%  N=119    rsd 1.0%    anchor 0.91x
+  [   4/760] draft/forward/q1/kv4                  849.938 mJ/call    19.435 ms   43.8 W  meter  +0.4%  N=124    rsd 0.3%    anchor 0.90x
+  [   5/760] draft/forward/q1/kv7                  862.548 mJ/call    19.599 ms   43.9 W  meter  +0.7%  N=120    rsd 2.0%  
+  [   6/760] draft/forward/q1/kv8                  863.076 mJ/call    19.563 ms   44.1 W  meter  +0.7%  N=123    rsd 0.3%  
+  [   7/760] draft/forward/q1/kv11                 868.280 mJ/call    19.571 ms   44.5 W  meter  +0.3%  N=123    rsd 0.4%  
+  [   8/760] draft/forward/q1/kv12                 870.091 mJ/call    19.533 ms   44.5 W  meter  +0.2%  N=123    rsd 0.4%  
+  [   9/760] draft/forward/q2/kv1                  916.767 mJ/call    21.861 ms   42.0 W  meter  +1.6%  N=119    rsd 0.7%  
+  [  10/760] draft/forward/q2/kv2                  934.683 mJ/call    21.927 ms   42.3 W  meter  +1.7%  N=116    rsd 1.9%  
+  [  11/760] draft/forward/q2/kv3                  934.272 mJ/call    21.858 ms   42.7 W  meter  +1.8%  N=124    rsd 0.5%    anchor 0.86x
+  [  12/760] draft/forward/q2/kv4                  953.304 mJ/call    22.028 ms   43.3 W  meter  +2.5%  N=118    rsd 0.7%    anchor 0.88x
+  [  13/760] draft/forward/q2/kv7                 1002.831 mJ/call    22.352 ms   45.0 W  meter  +2.8%  N=121    rsd 0.7%  
+  [  14/760] draft/forward/q2/kv8                 1009.145 mJ/call    22.235 ms   45.5 W  meter  +2.1%  N=121    rsd 0.5%  
+  [  15/760] draft/forward/q2/kv11                1054.063 mJ/call    21.875 ms   48.2 W  meter  -0.3%  N=123    rsd 0.6%  
+  [  16/760] draft/forward/q2/kv12                1054.470 mJ/call    21.854 ms   48.4 W  meter  +1.5%  N=122    rsd 0.5%  
+  [  17/760] draft/prefill/prefill                1422.222 mJ/call    23.800 ms   59.7 W  meter  +0.3%  N=122    rsd 0.3%    anchor 0.54x !!
+  [  18/760] draft/layer/L0/q1/kv1                  28.911 mJ/call     0.695 ms   41.6 W  meter  +2.8%  N=2979   rsd 1.1%  
+  [  19/760] draft/layer/L0/q1/kv2                  29.006 mJ/call     0.703 ms   41.2 W  meter  +1.2%  N=2956   rsd 0.8%  
+  [  20/760] draft/layer/L0/q1/kv3                  28.694 mJ/call     0.701 ms   40.9 W  meter  +1.3%  N=2940   rsd 0.6%    anchor 0.66x !!
+  [  21/760] draft/layer/L0/q1/kv4                  29.076 mJ/call     0.716 ms   40.9 W  meter  +3.0%  N=2951   rsd 0.9%    anchor 0.62x !!
+  [  22/760] draft/layer/L0/q1/kv7                  29.269 mJ/call     0.716 ms   40.9 W  meter  +1.2%  N=2937   rsd 0.5%  
+  [  23/760] draft/layer/L0/q1/kv8                  29.349 mJ/call     0.718 ms   40.9 W  meter  +1.6%  N=2930   rsd 0.5%  
+  [  24/760] draft/layer/L0/q1/kv11                 29.504 mJ/call     0.712 ms   41.4 W  meter  +0.4%  N=2908   rsd 0.8%  
+  [  25/760] draft/layer/L0/q1/kv12                 29.533 mJ/call     0.713 ms   41.3 W  meter  +0.6%  N=2880   rsd 0.8%  
+  [  26/760] draft/layer/L0/q2/kv1                  33.073 mJ/call     0.851 ms   39.0 W  meter  +1.1%  N=2470   rsd 1.2%  
+  [  27/760] draft/layer/L0/q2/kv2                  33.263 mJ/call     0.840 ms   39.6 W  meter  +2.0%  N=2450   rsd 1.0%  
+  [  28/760] draft/layer/L0/q2/kv3                  33.972 mJ/call     0.856 ms   39.7 W  meter  +3.3%  N=2442   rsd 0.7%    anchor 0.66x !!
+  [  29/760] draft/layer/L0/q2/kv4                  34.256 mJ/call     0.855 ms   40.1 W  meter  +1.6%  N=2391   rsd 0.9%    anchor 0.69x !!
+  [  30/760] draft/layer/L0/q2/kv7                  36.544 mJ/call     0.857 ms   42.6 W  meter  +1.6%  N=2401   rsd 0.7%  
+  [  31/760] draft/layer/L0/q2/kv8                  36.667 mJ/call     0.860 ms   42.6 W  meter  +1.3%  N=2419   rsd 0.8%  
+  [  32/760] draft/layer/L0/q2/kv11                 38.117 mJ/call     0.843 ms   45.2 W  meter  +0.1%  N=2490   rsd 0.6%  
+  [  33/760] draft/layer/L0/q2/kv12                 38.422 mJ/call     0.846 ms   45.5 W  meter  +1.5%  N=2464   rsd 0.7%  
+  [  34/760] draft/layer/L12/q1/kv1                 28.763 mJ/call     0.705 ms   40.6 W  meter  +2.4%  N=2922   rsd 0.7%  
+  [  35/760] draft/layer/L12/q1/kv2                 29.140 mJ/call     0.715 ms   40.8 W  meter  +1.7%  N=2903   rsd 0.6%  
+  [  36/760] draft/layer/L12/q1/kv3                 28.767 mJ/call     0.710 ms   40.5 W  meter  +1.0%  N=2931   rsd 0.7%    anchor 0.70x !!
+  [  37/760] draft/layer/L12/q1/kv4                 29.122 mJ/call     0.711 ms   40.7 W  meter  +2.0%  N=2949   rsd 1.0%    anchor 0.65x !!
+  [  38/760] draft/layer/L12/q1/kv7                 29.241 mJ/call     0.713 ms   41.1 W  meter  +2.6%  N=2893   rsd 0.8%  
+  [  39/760] draft/layer/L12/q1/kv8                 29.080 mJ/call     0.715 ms   40.7 W  meter  +1.5%  N=2892   rsd 0.7%  
+  [  40/760] draft/layer/L12/q1/kv11                29.440 mJ/call     0.712 ms   41.3 W  meter  +1.4%  N=2889   rsd 0.7%  
+  [  41/760] draft/layer/L12/q1/kv12                29.476 mJ/call     0.713 ms   41.3 W  meter  +2.6%  N=2942   rsd 1.7%  
+  [  42/760] draft/layer/L12/q2/kv1                 32.633 mJ/call     0.837 ms   39.0 W  meter  +1.5%  N=2489   rsd 0.6%  
+  [  43/760] draft/layer/L12/q2/kv2                 33.126 mJ/call     0.841 ms   39.4 W  meter  +1.7%  N=2452   rsd 0.8%  
+  [  44/760] draft/layer/L12/q2/kv3                 33.502 mJ/call     0.835 ms   40.0 W  meter  +1.3%  N=2465   rsd 0.8%    anchor 0.68x !!
+  [  45/760] draft/layer/L12/q2/kv4                 33.963 mJ/call     0.836 ms   40.6 W  meter  +1.3%  N=2482   rsd 0.8%    anchor 0.73x !!
+  [  46/760] draft/layer/L12/q2/kv7                 35.496 mJ/call     0.828 ms   42.8 W  meter  +1.6%  N=2514   rsd 0.6%  
+  [  47/760] draft/layer/L12/q2/kv8                 36.138 mJ/call     0.834 ms   43.2 W  meter  +2.3%  N=2509   rsd 0.6%  
+  [  48/760] draft/layer/L12/q2/kv11                37.703 mJ/call     0.832 ms   45.4 W  meter  +1.5%  N=2506   rsd 0.8%  
+  [  49/760] draft/layer/L12/q2/kv12                38.273 mJ/call     0.835 ms   45.9 W  meter  +1.8%  N=2512   rsd 0.3%  
+  [  50/760] draft/layer/L23/q1/kv1                 28.390 mJ/call     0.689 ms   41.1 W  meter  +1.6%  N=3048   rsd 0.7%  
+  [  51/760] draft/layer/L23/q1/kv2                 28.826 mJ/call     0.702 ms   40.8 W  meter  +2.0%  N=2929   rsd 1.0%  
+  [  52/760] draft/layer/L23/q1/kv3                 28.669 mJ/call     0.699 ms   41.2 W  meter  +1.7%  N=3002   rsd 0.5%    anchor 0.71x !!
+  [  53/760] draft/layer/L23/q1/kv4                 28.436 mJ/call     0.693 ms   41.0 W  meter  +1.6%  N=3006   rsd 0.6%    anchor 0.65x !!
+  [  54/760] draft/layer/L23/q1/kv7                 29.014 mJ/call     0.697 ms   41.3 W  meter  +1.3%  N=2933   rsd 1.3%  
+  [  55/760] draft/layer/L23/q1/kv8                 29.160 mJ/call     0.710 ms   41.2 W  meter  +3.1%  N=2946   rsd 1.0%  
+  [  56/760] draft/layer/L23/q1/kv11                28.890 mJ/call     0.699 ms   41.5 W  meter  +1.5%  N=2953   rsd 0.9%  
+  [  57/760] draft/layer/L23/q1/kv12                28.976 mJ/call     0.699 ms   41.5 W  meter  +1.4%  N=3005   rsd 0.7%  
+  [  58/760] draft/layer/L23/q2/kv1                 32.589 mJ/call     0.826 ms   39.6 W  meter  +1.8%  N=2488   rsd 1.0%  
+  [  59/760] draft/layer/L23/q2/kv2                 33.272 mJ/call     0.841 ms   39.7 W  meter  +3.2%  N=2506   rsd 0.7%  
+  [  60/760] draft/layer/L23/q2/kv3                 33.583 mJ/call     0.837 ms   40.1 W  meter  +2.0%  N=2505   rsd 0.8%    anchor 0.69x !!
+  [  61/760] draft/layer/L23/q2/kv4                 33.787 mJ/call     0.835 ms   40.7 W  meter  +1.5%  N=2497   rsd 0.5%    anchor 0.73x !!
+  [  62/760] draft/layer/L23/q2/kv7                 36.061 mJ/call     0.840 ms   42.9 W  meter  +1.8%  N=2448   rsd 0.8%  
+  [  63/760] draft/layer/L23/q2/kv8                 36.337 mJ/call     0.837 ms   43.4 W  meter  +1.1%  N=2503   rsd 0.8%  
+  [  64/760] draft/layer/L23/q2/kv11                38.078 mJ/call     0.835 ms   45.6 W  meter  +2.6%  N=2450   rsd 0.6%  
+  [  65/760] draft/layer/L23/q2/kv12                38.502 mJ/call     0.832 ms   46.2 W  meter  +1.0%  N=2518   rsd 0.5%  
+  [  66/760] draft/attn/L0/q1/kv1                   10.695 mJ/call     0.340 ms   31.4 W  meter  +0.3%  N=5928   rsd 0.7%  
+  [  67/760] draft/attn/L0/q1/kv2                   11.110 mJ/call     0.356 ms   31.2 W  meter  +0.9%  N=5684   rsd 0.2%  
+  [  68/760] draft/attn/L0/q1/kv3                   11.068 mJ/call     0.356 ms   31.1 W  meter  +0.7%  N=5677   rsd 0.6%    anchor 0.74x !!
+  [  69/760] draft/attn/L0/q1/kv4                   11.146 mJ/call     0.357 ms   31.2 W  meter  +0.4%  N=5709   rsd 0.3%    anchor 0.72x !!
+  [  70/760] draft/attn/L0/q1/kv7                   11.180 mJ/call     0.354 ms   31.6 W  meter  +1.0%  N=5763   rsd 0.7%  
+  [  71/760] draft/attn/L0/q1/kv8                   11.209 mJ/call     0.354 ms   31.7 W  meter  +0.9%  N=5707   rsd 0.4%  
+  [  72/760] draft/attn/L0/q1/kv11                  11.361 mJ/call     0.355 ms   32.0 W  meter  +0.8%  N=5805   rsd 0.6%  
+  [  73/760] draft/attn/L0/q1/kv12                  11.379 mJ/call     0.355 ms   32.1 W  meter  +1.1%  N=5702   rsd 0.7%  
+  [  74/760] draft/attn/L0/q2/kv1                   15.100 mJ/call     0.469 ms   32.3 W  meter  +0.8%  N=4311   rsd 0.1%  
+  [  75/760] draft/attn/L0/q2/kv2                   15.595 mJ/call     0.471 ms   33.1 W  meter  +0.5%  N=4357   rsd 0.9%  
+  [  76/760] draft/attn/L0/q2/kv3                   16.000 mJ/call     0.473 ms   33.6 W  meter  +1.2%  N=4247   rsd 1.8%    anchor 0.76x !!
+  [  77/760] draft/attn/L0/q2/kv4                   17.300 mJ/call     0.502 ms   34.3 W  meter  +5.6%  N=4048   rsd 1.7%    anchor 0.81x
+  [  78/760] draft/attn/L0/q2/kv7                   18.926 mJ/call     0.501 ms   37.8 W  meter  +0.1%  N=4026   rsd 0.5%  
+  [  79/760] draft/attn/L0/q2/kv8                   19.487 mJ/call     0.503 ms   38.6 W  meter  +0.6%  N=4038   rsd 0.8%  
+  [  80/760] draft/attn/L0/q2/kv11                  20.707 mJ/call     0.472 ms   43.4 W  meter  -4.4%  N=4326   rsd 1.0%  
+  [  81/760] draft/attn/L0/q2/kv12                  20.986 mJ/call     0.475 ms   44.2 W  meter  +1.3%  N=4371   rsd 0.6%  
+  [  82/760] draft/attn/L12/q1/kv1                  10.782 mJ/call     0.344 ms   31.4 W  meter  +0.9%  N=5876   rsd 0.5%  
+  [  83/760] draft/attn/L12/q1/kv2                  10.960 mJ/call     0.349 ms   31.4 W  meter  +0.6%  N=5780   rsd 0.5%  
+  [  84/760] draft/attn/L12/q1/kv3                  11.144 mJ/call     0.353 ms   31.2 W  meter  +1.1%  N=5697   rsd 2.2%    anchor 0.79x !!
+  [  85/760] draft/attn/L12/q1/kv4                  11.690 mJ/call     0.374 ms   31.2 W  meter  +0.2%  N=5392   rsd 0.8%    anchor 0.81x
+  [  86/760] draft/attn/L12/q1/kv7                  12.001 mJ/call     0.380 ms   31.5 W  meter  +2.0%  N=5433   rsd 1.2%  
+  [  87/760] draft/attn/L12/q1/kv8                  11.934 mJ/call     0.379 ms   31.6 W  meter  +0.3%  N=5526   rsd 2.3%  
+  [  88/760] draft/attn/L12/q1/kv11                 11.508 mJ/call     0.356 ms   32.3 W  meter  -0.3%  N=5751   rsd 0.9%  
+  [  89/760] draft/attn/L12/q1/kv12                 11.613 mJ/call     0.360 ms   32.3 W  meter  +0.4%  N=5708   rsd 0.9%  
+  [  90/760] draft/attn/L12/q2/kv1                  15.363 mJ/call     0.478 ms   32.2 W  meter  +0.7%  N=4276   rsd 0.5%  
+  [  91/760] draft/attn/L12/q2/kv2                  15.620 mJ/call     0.469 ms   33.2 W  meter  +0.4%  N=4351   rsd 0.8%  
+  [  92/760] draft/attn/L12/q2/kv3                  16.046 mJ/call     0.472 ms   34.0 W  meter  +0.8%  N=4321   rsd 0.4%    anchor 0.81x
+  [  93/760] draft/attn/L12/q2/kv4                  16.775 mJ/call     0.480 ms   34.8 W  meter  +1.6%  N=4297   rsd 0.9%    anchor 0.83x
+  [  94/760] draft/attn/L12/q2/kv7                  18.509 mJ/call     0.482 ms   38.4 W  meter  +2.6%  N=4280   rsd 0.4%  
+  [  95/760] draft/attn/L12/q2/kv8                  19.163 mJ/call     0.488 ms   39.5 W  meter  +0.8%  N=4240   rsd 1.1%  
+  [  96/760] draft/attn/L12/q2/kv11                 20.880 mJ/call     0.482 ms   43.4 W  meter  +1.2%  N=4236   rsd 0.9%  
+  [  97/760] draft/attn/L12/q2/kv12                 21.407 mJ/call     0.485 ms   44.2 W  meter  +0.6%  N=4248   rsd 0.7%  
+  [  98/760] draft/attn/L23/q1/kv1                  10.940 mJ/call     0.348 ms   31.4 W  meter  +0.8%  N=5810   rsd 0.6%  
+  [  99/760] draft/attn/L23/q1/kv2                  11.232 mJ/call     0.356 ms   31.4 W  meter  +0.1%  N=5658   rsd 0.5%  
+  [ 100/760] draft/attn/L23/q1/kv3                  11.269 mJ/call     0.358 ms   31.5 W  meter  +0.7%  N=5804   rsd 0.7%    anchor 0.81x
+  [ 101/760] draft/attn/L23/q1/kv4                  11.281 mJ/call     0.358 ms   31.5 W  meter  +2.0%  N=5715   rsd 0.7%    anchor 0.81x
+  [ 102/760] draft/attn/L23/q1/kv7                  11.483 mJ/call     0.360 ms   31.8 W  meter  +0.5%  N=5703   rsd 0.8%  
+  [ 103/760] draft/attn/L23/q1/kv8                  11.828 mJ/call     0.371 ms   31.9 W  meter  +3.0%  N=5556   rsd 1.5%  
+  [ 104/760] draft/attn/L23/q1/kv11                 11.889 mJ/call     0.370 ms   32.2 W  meter  +0.6%  N=5576   rsd 0.6%  
+  [ 105/760] draft/attn/L23/q1/kv12                 11.878 mJ/call     0.369 ms   32.2 W  meter  +3.8%  N=5566   rsd 1.1%  
+  [ 106/760] draft/attn/L23/q2/kv1                  15.455 mJ/call     0.476 ms   32.4 W  meter  +0.6%  N=4242   rsd 0.2%  
+  [ 107/760] draft/attn/L23/q2/kv2                  15.970 mJ/call     0.482 ms   33.1 W  meter  +2.0%  N=4277   rsd 0.8%  
+  [ 108/760] draft/attn/L23/q2/kv3                  16.035 mJ/call     0.471 ms   34.0 W  meter  -0.1%  N=4337   rsd 0.8%    anchor 0.81x
+  [ 109/760] draft/attn/L23/q2/kv4                  16.404 mJ/call     0.469 ms   35.0 W  meter  +0.6%  N=4394   rsd 0.5%    anchor 0.81x
+  [ 110/760] draft/attn/L23/q2/kv7                  18.037 mJ/call     0.464 ms   38.9 W  meter  +0.7%  N=4457   rsd 1.5%  
+  [ 111/760] draft/attn/L23/q2/kv8                  19.191 mJ/call     0.491 ms   39.3 W  meter  +0.4%  N=4181   rsd 1.0%  
+  [ 112/760] draft/attn/L23/q2/kv11                 20.987 mJ/call     0.486 ms   43.3 W  meter  +3.5%  N=4312   rsd 1.2%  
+  [ 113/760] draft/attn/L23/q2/kv12                 21.726 mJ/call     0.494 ms   44.1 W  meter  +1.3%  N=4166   rsd 0.8%  
+  [ 114/760] draft/mlp/L0/q1                        11.111 mJ/call     0.186 ms   59.8 W  meter  +1.3%  N=11080  rsd 0.3%    anchor 0.82x
+  [ 115/760] draft/mlp/L0/q2                        11.697 mJ/call     0.196 ms   59.7 W  meter  +0.9%  N=10315  rsd 0.1%    anchor 0.80x
+  [ 116/760] draft/mlp/L12/q1                       11.097 mJ/call     0.186 ms   59.8 W  meter  +0.7%  N=11085  rsd 0.1%    anchor 0.83x
+  [ 117/760] draft/mlp/L12/q2                       11.746 mJ/call     0.197 ms   59.8 W  meter  +1.0%  N=10373  rsd 0.1%    anchor 0.82x
+  [ 118/760] draft/mlp/L23/q1                       11.136 mJ/call     0.187 ms   59.7 W  meter  +0.5%  N=10836  rsd 0.6%    anchor 0.83x
+  [ 119/760] draft/mlp/L23/q2                       11.725 mJ/call     0.196 ms   59.8 W  meter  +0.8%  N=10293  rsd 0.1%    anchor 0.82x
+  [ 120/760] draft/norm_in/L0/q1                     2.135 mJ/call     0.074 ms   29.0 W  meter  +1.1%  N=27323  rsd 1.1%    anchor 0.54x !!
+  [ 121/760] draft/norm_in/L0/q2                     2.180 mJ/call     0.076 ms   28.7 W  meter  +2.5%  N=26458  rsd 2.5%    anchor 0.56x !!
+  [ 122/760] draft/norm_in/L12/q1                    2.229 mJ/call     0.078 ms   28.6 W  meter  +2.4%  N=25585  rsd 4.3%    anchor 0.58x !!
+  [ 123/760] draft/norm_in/L12/q2                    2.232 mJ/call     0.078 ms   28.5 W  meter  +0.9%  N=26045  rsd 0.5%    anchor 0.58x !!
+  [ 124/760] draft/norm_in/L23/q1                    2.083 mJ/call     0.073 ms   28.4 W  meter  +0.7%  N=27524  rsd 0.2%    anchor 0.56x !!
+  [ 125/760] draft/norm_in/L23/q2                    2.215 mJ/call     0.078 ms   28.4 W  meter  +5.6%  N=25742  rsd 1.3%    anchor 0.58x !!
+  [ 126/760] draft/norm_post/L0/q1                   2.092 mJ/call     0.074 ms   28.3 W  meter  +1.1%  N=27297  rsd 0.4%    anchor 0.54x !!
+  [ 127/760] draft/norm_post/L0/q2                   2.120 mJ/call     0.075 ms   28.4 W  meter  +1.2%  N=26945  rsd 0.5%    anchor 0.54x !!
+  [ 128/760] draft/norm_post/L12/q1                  2.069 mJ/call     0.073 ms   28.3 W  meter  +0.0%  N=27524  rsd 0.7%    anchor 0.55x !!
+  [ 129/760] draft/norm_post/L12/q2                  2.148 mJ/call     0.076 ms   28.3 W  meter  +2.9%  N=26636  rsd 0.4%    anchor 0.57x !!
+  [ 130/760] draft/norm_post/L23/q1                  2.111 mJ/call     0.075 ms   28.2 W  meter  +1.0%  N=26995  rsd 0.5%    anchor 0.57x !!
+  [ 131/760] draft/norm_post/L23/q2                  2.115 mJ/call     0.075 ms   28.3 W  meter  +0.9%  N=26943  rsd 0.4%    anchor 0.56x !!
+  [ 132/760] draft/lm_head/q1                      104.878 mJ/call     1.755 ms   59.8 W  meter  +4.9%  N=1195   rsd 0.5%    anchor 1.04x
+  [ 133/760] draft/embed/q1                          0.355 mJ/call     0.013 ms   28.3 W  meter  -0.3%  N=159700 rsd 0.2%    anchor 0.22x !!
+  [ 134/760] draft/embed/q2                          0.353 mJ/call     0.012 ms   28.4 W  meter  +0.2%  N=162022 rsd 0.5%    anchor 0.23x !!
+  [ 135/760] draft/rope/q1                           2.482 mJ/call     0.088 ms   28.2 W  meter  +1.2%  N=22863  rsd 1.1%    anchor 0.52x !!
+  [ 136/760] draft/rope/q2                           2.561 mJ/call     0.091 ms   28.1 W  meter  +4.9%  N=22122  rsd 1.6%    anchor 0.56x !!
+  [ 137/760] draft/norm/q1                           2.090 mJ/call     0.074 ms   28.2 W  meter  -2.7%  N=27060  rsd 1.0%    anchor 0.56x !!
+  [ 138/760] draft/norm/q2                           2.199 mJ/call     0.078 ms   28.2 W  meter  +0.7%  N=25890  rsd 0.1%    anchor 0.58x !!
+  [ 139/760] target/forward/q1/kv1                2244.812 mJ/call    42.140 ms   53.4 W  meter  +3.1%  N=118    rsd 0.4%  
+  [ 140/760] target/forward/q1/kv2                2283.762 mJ/call    42.120 ms   54.1 W  meter  +0.8%  N=120    rsd 0.9%  
+  [ 141/760] target/forward/q1/kv3                2312.310 mJ/call    42.662 ms   54.2 W  meter  +3.2%  N=117    rsd 0.4%    anchor 0.97x
+  [ 142/760] target/forward/q1/kv4                2263.656 mJ/call    40.933 ms   55.3 W  meter  -2.3%  N=124    rsd 0.5%    anchor 0.95x
+  [ 143/760] target/forward/q1/kv7                2336.096 mJ/call    42.785 ms   54.7 W  meter  +4.8%  N=117    rsd 0.5%  
+  [ 144/760] target/forward/q1/kv8                2309.382 mJ/call    41.575 ms   55.5 W  meter  +2.3%  N=119    rsd 1.3%  
+  [ 145/760] target/forward/q1/kv11               2363.441 mJ/call    42.745 ms   55.3 W  meter  +0.1%  N=122    rsd 0.3%  
+  [ 146/760] target/forward/q1/kv12               2367.314 mJ/call    42.357 ms   56.0 W  meter  -0.5%  N=123    rsd 0.5%  
+  [ 147/760] target/forward/q2/kv1                2605.290 mJ/call    43.921 ms   59.3 W  meter  +1.5%  N=119    rsd 0.9%  
+  [ 148/760] target/forward/q2/kv2                2595.023 mJ/call    43.496 ms   59.7 W  meter  +1.8%  N=119    rsd 0.5%  
+  [ 149/760] target/forward/q2/kv3                2651.118 mJ/call    44.444 ms   59.7 W  meter  +1.7%  N=119    rsd 0.3%    anchor 0.91x
+  [ 150/760] target/forward/q2/kv4                2707.049 mJ/call    45.316 ms   59.7 W  meter  +1.1%  N=119    rsd 0.2%    anchor 0.94x
+  [ 151/760] target/forward/q2/kv7                2903.489 mJ/call    48.579 ms   59.8 W  meter  +0.6%  N=120    rsd 0.2%  
+  [ 152/760] target/forward/q2/kv8                2949.571 mJ/call    49.328 ms   59.8 W  meter  +0.6%  N=120    rsd 0.2%  
+  [ 153/760] target/forward/q2/kv11               3186.775 mJ/call    53.417 ms   59.7 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 154/760] target/forward/q2/kv12               3238.849 mJ/call    54.260 ms   59.7 W  meter  +0.5%  N=120    rsd 0.2%  
+  [ 155/760] target/forward/q3/kv1                3013.092 mJ/call    50.459 ms   59.7 W  meter  +0.6%  N=121    rsd 0.3%  
+  [ 156/760] target/forward/q3/kv2                3101.268 mJ/call    51.996 ms   59.6 W  meter  +0.6%  N=120    rsd 0.1%  
+  [ 157/760] target/forward/q3/kv3                3175.970 mJ/call    53.258 ms   59.6 W  meter  +0.7%  N=120    rsd 0.2%    anchor 0.98x
+  [ 158/760] target/forward/q3/kv4                3220.452 mJ/call    53.979 ms   59.7 W  meter  +0.6%  N=120    rsd 0.1%    anchor 0.99x
+  [ 159/760] target/forward/q3/kv7                3461.854 mJ/call    58.013 ms   59.6 W  meter  +0.5%  N=121    rsd 0.2%  
+  [ 160/760] target/forward/q3/kv8                3508.561 mJ/call    58.861 ms   59.6 W  meter  +0.5%  N=121    rsd 0.2%  
+  [ 161/760] target/forward/q3/kv11               3739.528 mJ/call    62.679 ms   59.7 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 162/760] target/forward/q3/kv12               3801.720 mJ/call    63.640 ms   59.7 W  meter  +0.3%  N=121    rsd 0.1%  
+  [ 163/760] target/forward/q4/kv1                3367.184 mJ/call    56.815 ms   59.3 W  meter  +0.6%  N=120    rsd 0.3%  
+  [ 164/760] target/forward/q4/kv2                3448.461 mJ/call    58.046 ms   59.4 W  meter  +0.6%  N=121    rsd 0.2%  
+  [ 165/760] target/forward/q4/kv3                3542.893 mJ/call    59.559 ms   59.5 W  meter  +0.6%  N=121    rsd 0.2%    anchor 0.98x
+  [ 166/760] target/forward/q4/kv4                3588.463 mJ/call    60.320 ms   59.5 W  meter  +0.6%  N=121    rsd 0.1%    anchor 0.98x
+  [ 167/760] target/forward/q4/kv7                3834.994 mJ/call    64.322 ms   59.6 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 168/760] target/forward/q4/kv8                3870.730 mJ/call    64.945 ms   59.6 W  meter  +0.4%  N=120    rsd 0.2%  
+  [ 169/760] target/forward/q4/kv11               4109.954 mJ/call    68.853 ms   59.7 W  meter  +0.4%  N=121    rsd 0.1%  
+  [ 170/760] target/forward/q4/kv12               4134.231 mJ/call    69.275 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 171/760] target/forward/q5/kv1                3397.720 mJ/call    57.195 ms   59.4 W  meter  +0.6%  N=121    rsd 0.1%  
+  [ 172/760] target/forward/q5/kv2                3505.753 mJ/call    58.870 ms   59.6 W  meter  +0.5%  N=121    rsd 0.1%  
+  [ 173/760] target/forward/q5/kv3                3566.029 mJ/call    59.980 ms   59.5 W  meter  +0.5%  N=120    rsd 0.2%    anchor 0.98x
+  [ 174/760] target/forward/q5/kv4                3611.313 mJ/call    60.685 ms   59.5 W  meter  +0.4%  N=120    rsd 0.1%    anchor 0.98x
+  [ 175/760] target/forward/q5/kv7                3836.286 mJ/call    64.344 ms   59.6 W  meter  +0.5%  N=120    rsd 0.2%  
+  [ 176/760] target/forward/q5/kv8                3889.754 mJ/call    65.286 ms   59.6 W  meter  +0.5%  N=121    rsd 0.1%  
+  [ 177/760] target/forward/q5/kv11               4140.955 mJ/call    69.336 ms   59.7 W  meter  +0.4%  N=120    rsd 0.1%  
+  [ 178/760] target/forward/q5/kv12               4165.615 mJ/call    69.820 ms   59.7 W  meter  +0.4%  N=120    rsd 0.0%  
+  [ 179/760] target/forward/q6/kv1                3429.648 mJ/call    57.691 ms   59.4 W  meter  +0.6%  N=120    rsd 0.1%  
+  [ 180/760] target/forward/q6/kv2                3509.896 mJ/call    58.996 ms   59.5 W  meter  +0.6%  N=120    rsd 0.1%  
+  [ 181/760] target/forward/q6/kv3                3579.440 mJ/call    60.103 ms   59.6 W  meter  +0.5%  N=120    rsd 0.1%    anchor 0.97x
+  [ 182/760] target/forward/q6/kv4                3626.521 mJ/call    60.913 ms   59.5 W  meter  +0.5%  N=120    rsd 0.2%    anchor 0.98x
+  [ 183/760] target/forward/q6/kv7                3879.623 mJ/call    64.988 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 184/760] target/forward/q6/kv8                3925.436 mJ/call    65.722 ms   59.6 W  meter  +0.4%  N=120    rsd 0.1%  
+  [ 185/760] target/forward/q6/kv11               4159.104 mJ/call    69.699 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 186/760] target/forward/q6/kv12               4195.909 mJ/call    70.261 ms   59.7 W  meter  +0.5%  N=120    rsd 0.2%  
+  [ 187/760] target/forward/q7/kv1                3427.892 mJ/call    57.463 ms   59.7 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 188/760] target/forward/q7/kv2                3509.138 mJ/call    58.904 ms   59.6 W  meter  +0.5%  N=121    rsd 0.1%  
+  [ 189/760] target/forward/q7/kv3                3550.290 mJ/call    59.674 ms   59.5 W  meter  +0.5%  N=121    rsd 0.2%    anchor 0.97x
+  [ 190/760] target/forward/q7/kv4                3650.766 mJ/call    61.166 ms   59.7 W  meter  +0.5%  N=121    rsd 0.2%    anchor 0.98x
+  [ 191/760] target/forward/q7/kv7                3873.969 mJ/call    64.974 ms   59.6 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 192/760] target/forward/q7/kv8                3914.357 mJ/call    65.550 ms   59.7 W  meter  +0.4%  N=121    rsd 0.0%  
+  [ 193/760] target/forward/q7/kv11               4157.753 mJ/call    69.713 ms   59.6 W  meter  +0.4%  N=121    rsd 0.2%  
+  [ 194/760] target/forward/q7/kv12               4200.300 mJ/call    70.308 ms   59.7 W  meter  +0.4%  N=121    rsd 0.1%  
+  [ 195/760] target/forward/q8/kv1                3499.110 mJ/call    58.667 ms   59.6 W  meter  +0.5%  N=121    rsd 0.2%  
+  [ 196/760] target/forward/q8/kv2                3571.187 mJ/call    59.981 ms   59.5 W  meter  +0.5%  N=120    rsd 0.1%  
+  [ 197/760] target/forward/q8/kv3                3604.176 mJ/call    60.377 ms   59.7 W  meter  +0.6%  N=121    rsd 0.2%    anchor 0.97x
+  [ 198/760] target/forward/q8/kv4                3700.677 mJ/call    62.099 ms   59.6 W  meter  +0.5%  N=121    rsd 0.1%    anchor 0.98x
+  [ 199/760] target/forward/q8/kv7                3923.413 mJ/call    65.721 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 200/760] target/forward/q8/kv8                3966.977 mJ/call    66.432 ms   59.7 W  meter  +0.4%  N=120    rsd 0.1%  
+  [ 201/760] target/forward/q8/kv11               4215.640 mJ/call    70.615 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 202/760] target/forward/q8/kv12               4275.496 mJ/call    71.588 ms   59.7 W  meter  +0.4%  N=120    rsd 0.1%  
+  [ 203/760] target/forward/q9/kv1                3497.818 mJ/call    58.656 ms   59.6 W  meter  +0.6%  N=120    rsd 0.2%  
+  [ 204/760] target/forward/q9/kv2                3602.697 mJ/call    60.269 ms   59.8 W  meter  +0.6%  N=120    rsd 0.2%  
+  [ 205/760] target/forward/q9/kv3                3628.485 mJ/call    60.770 ms   59.7 W  meter  +0.6%  N=120    rsd 0.1%    anchor 0.97x
+  [ 206/760] target/forward/q9/kv4                3705.127 mJ/call    62.113 ms   59.6 W  meter  +0.5%  N=121    rsd 0.2%    anchor 0.99x
+  [ 207/760] target/forward/q9/kv7                3928.468 mJ/call    65.709 ms   59.8 W  meter  +0.4%  N=120    rsd 0.2%  
+  [ 208/760] target/forward/q9/kv8                3963.250 mJ/call    66.371 ms   59.7 W  meter  +0.3%  N=120    rsd 0.2%  
+  [ 209/760] target/forward/q9/kv11               4213.329 mJ/call    70.497 ms   59.7 W  meter  +0.4%  N=120    rsd 0.1%  
+  [ 210/760] target/forward/q9/kv12               4266.069 mJ/call    71.394 ms   59.7 W  meter  +0.3%  N=120    rsd 0.1%  
+  [ 211/760] target/prefill/prefill              51236.660 mJ/call   857.792 ms   59.7 W  meter  +0.0%  N=120    rsd 0.0%    anchor 2.71x !!
+  [ 212/760] target/layer/L0/q1/kv1                 54.047 mJ/call     1.030 ms   52.3 W  meter  +3.9%  N=1957   rsd 0.6%  
+  [ 213/760] target/layer/L0/q1/kv2                 54.690 mJ/call     1.042 ms   52.4 W  meter  +4.2%  N=1954   rsd 0.3%  
+  [ 214/760] target/layer/L0/q1/kv3                 54.855 mJ/call     1.051 ms   52.6 W  meter  +5.3%  N=1986   rsd 0.7%    anchor 0.62x !!
+  [ 215/760] target/layer/L0/q1/kv4                 54.847 mJ/call     1.045 ms   52.5 W  meter  +4.8%  N=1995   rsd 0.4%    anchor 0.66x !!
+  [ 216/760] target/layer/L0/q1/kv7                 55.119 mJ/call     1.034 ms   53.0 W  meter  +3.0%  N=2004   rsd 0.4%  
+  [ 217/760] target/layer/L0/q1/kv8                 55.610 mJ/call     1.055 ms   52.7 W  meter  +5.4%  N=1953   rsd 0.8%  
+  [ 218/760] target/layer/L0/q1/kv11                55.458 mJ/call     1.044 ms   52.9 W  meter  +4.2%  N=1990   rsd 0.7%  
+  [ 219/760] target/layer/L0/q1/kv12                55.506 mJ/call     1.043 ms   53.2 W  meter  +3.6%  N=1971   rsd 0.8%  
+  [ 220/760] target/layer/L0/q2/kv1                 67.872 mJ/call     1.198 ms   56.9 W  meter  +7.2%  N=1704   rsd 0.7%  
+  [ 221/760] target/layer/L0/q2/kv2                 69.809 mJ/call     1.191 ms   58.3 W  meter  +4.7%  N=1740   rsd 0.7%  
+  [ 222/760] target/layer/L0/q2/kv3                 71.337 mJ/call     1.201 ms   59.4 W  meter  +6.9%  N=1711   rsd 0.6%    anchor 0.58x !!
+  [ 223/760] target/layer/L0/q2/kv4                 71.850 mJ/call     1.200 ms   59.6 W  meter  +5.4%  N=1696   rsd 1.2%    anchor 0.60x !!
+  [ 224/760] target/layer/L0/q2/kv7                 76.598 mJ/call     1.289 ms   59.4 W  meter  +4.6%  N=1584   rsd 0.9%  
+  [ 225/760] target/layer/L0/q2/kv8                 78.080 mJ/call     1.312 ms   59.5 W  meter  +4.0%  N=1570   rsd 0.7%  
+  [ 226/760] target/layer/L0/q2/kv11                85.086 mJ/call     1.425 ms   59.6 W  meter  +4.1%  N=1472   rsd 0.4%  
+  [ 227/760] target/layer/L0/q2/kv12                85.831 mJ/call     1.438 ms   59.7 W  meter  +3.7%  N=1445   rsd 0.6%  
+  [ 228/760] target/layer/L0/q3/kv1                 80.940 mJ/call     1.362 ms   59.4 W  meter  +5.8%  N=1509   rsd 0.6%  
+  [ 229/760] target/layer/L0/q3/kv2                 83.626 mJ/call     1.406 ms   59.5 W  meter  +5.8%  N=1463   rsd 0.3%  
+  [ 230/760] target/layer/L0/q3/kv3                 85.527 mJ/call     1.437 ms   59.5 W  meter  +6.2%  N=1444   rsd 0.7%    anchor 0.61x !!
+  [ 231/760] target/layer/L0/q3/kv4                 87.091 mJ/call     1.462 ms   59.5 W  meter  +5.7%  N=1395   rsd 0.6%    anchor 0.65x !!
+  [ 232/760] target/layer/L0/q3/kv7                 93.311 mJ/call     1.564 ms   59.5 W  meter  +5.4%  N=1303   rsd 1.1%  
+  [ 233/760] target/layer/L0/q3/kv8                 93.668 mJ/call     1.572 ms   59.6 W  meter  +4.2%  N=1311   rsd 0.5%  
+  [ 234/760] target/layer/L0/q3/kv11               100.805 mJ/call     1.683 ms   59.9 W  meter  +3.5%  N=1234   rsd 0.5%  
+  [ 235/760] target/layer/L0/q3/kv12               101.770 mJ/call     1.705 ms   59.7 W  meter  +3.8%  N=1206   rsd 0.7%  
+  [ 236/760] target/layer/L0/q4/kv1                 89.218 mJ/call     1.558 ms   57.3 W  meter  +6.2%  N=1310   rsd 0.5%  
+  [ 237/760] target/layer/L0/q4/kv2                 91.862 mJ/call     1.593 ms   57.6 W  meter  +5.9%  N=1291   rsd 0.8%  
+  [ 238/760] target/layer/L0/q4/kv3                 92.332 mJ/call     1.621 ms   57.0 W  meter  +5.7%  N=1260   rsd 0.5%    anchor 0.64x !!
+  [ 239/760] target/layer/L0/q4/kv4                 94.255 mJ/call     1.654 ms   56.9 W  meter  +5.6%  N=1222   rsd 0.1%    anchor 0.67x !!
+  [ 240/760] target/layer/L0/q4/kv7                100.260 mJ/call     1.737 ms   57.7 W  meter  +4.3%  N=1163   rsd 0.5%  
+  [ 241/760] target/layer/L0/q4/kv8                101.980 mJ/call     1.761 ms   57.9 W  meter  +3.9%  N=1179   rsd 0.5%  
+  [ 242/760] target/layer/L0/q4/kv11               108.431 mJ/call     1.855 ms   58.5 W  meter  +3.1%  N=1090   rsd 0.6%  
+  [ 243/760] target/layer/L0/q4/kv12               109.872 mJ/call     1.888 ms   58.2 W  meter  +3.7%  N=1079   rsd 0.6%  
+  [ 244/760] target/layer/L0/q5/kv1                 89.291 mJ/call     1.569 ms   56.9 W  meter  +6.0%  N=1313   rsd 0.6%  
+  [ 245/760] target/layer/L0/q5/kv2                 91.530 mJ/call     1.604 ms   57.1 W  meter  +5.6%  N=1272   rsd 0.7%  
+  [ 246/760] target/layer/L0/q5/kv3                 94.140 mJ/call     1.644 ms   57.3 W  meter  +6.1%  N=1265   rsd 0.6%    anchor 0.65x !!
+  [ 247/760] target/layer/L0/q5/kv4                 94.903 mJ/call     1.663 ms   57.1 W  meter  +5.4%  N=1227   rsd 0.6%    anchor 0.67x !!
+  [ 248/760] target/layer/L0/q5/kv7                101.811 mJ/call     1.758 ms   57.9 W  meter  +4.1%  N=1160   rsd 0.6%  
+  [ 249/760] target/layer/L0/q5/kv8                102.784 mJ/call     1.771 ms   58.0 W  meter  +3.9%  N=1139   rsd 0.2%  
+  [ 250/760] target/layer/L0/q5/kv11               109.337 mJ/call     1.868 ms   58.5 W  meter  +3.1%  N=1092   rsd 0.4%  
+  [ 251/760] target/layer/L0/q5/kv12               111.164 mJ/call     1.912 ms   58.1 W  meter  +4.3%  N=1064   rsd 0.5%  
+  [ 252/760] target/layer/L0/q6/kv1                 89.461 mJ/call     1.570 ms   57.0 W  meter  +5.9%  N=1323   rsd 0.6%  
+  [ 253/760] target/layer/L0/q6/kv2                 92.259 mJ/call     1.609 ms   57.3 W  meter  +5.5%  N=1268   rsd 0.5%  
+  [ 254/760] target/layer/L0/q6/kv3                 94.245 mJ/call     1.647 ms   57.2 W  meter  +6.1%  N=1228   rsd 0.5%    anchor 0.65x !!
+  [ 255/760] target/layer/L0/q6/kv4                 95.995 mJ/call     1.671 ms   57.5 W  meter  +5.4%  N=1243   rsd 0.5%    anchor 0.66x !!
+  [ 256/760] target/layer/L0/q6/kv7                101.660 mJ/call     1.752 ms   58.0 W  meter  +4.0%  N=1175   rsd 0.5%  
+  [ 257/760] target/layer/L0/q6/kv8                103.574 mJ/call     1.773 ms   58.3 W  meter  +3.6%  N=1161   rsd 0.7%  
+  [ 258/760] target/layer/L0/q6/kv11               110.187 mJ/call     1.887 ms   58.4 W  meter  +3.7%  N=1071   rsd 0.4%  
+  [ 259/760] target/layer/L0/q6/kv12               111.218 mJ/call     1.901 ms   58.5 W  meter  +3.6%  N=1074   rsd 0.1%  
+  [ 260/760] target/layer/L0/q7/kv1                 90.097 mJ/call     1.571 ms   57.3 W  meter  +6.0%  N=1298   rsd 0.7%  
+  [ 261/760] target/layer/L0/q7/kv2                 92.557 mJ/call     1.613 ms   57.4 W  meter  +5.8%  N=1267   rsd 0.6%  
+  [ 262/760] target/layer/L0/q7/kv3                 94.584 mJ/call     1.650 ms   57.4 W  meter  +6.4%  N=1224   rsd 0.5%    anchor 0.65x !!
+  [ 263/760] target/layer/L0/q7/kv4                 96.029 mJ/call     1.674 ms   57.3 W  meter  +5.5%  N=1208   rsd 0.5%    anchor 0.67x !!
+  [ 264/760] target/layer/L0/q7/kv7                102.349 mJ/call     1.756 ms   58.2 W  meter  +4.2%  N=1162   rsd 0.1%  
+  [ 265/760] target/layer/L0/q7/kv8                103.748 mJ/call     1.779 ms   58.3 W  meter  +4.0%  N=1146   rsd 0.4%  
+  [ 266/760] target/layer/L0/q7/kv11               110.969 mJ/call     1.889 ms   58.8 W  meter  +3.7%  N=1080   rsd 0.6%  
+  [ 267/760] target/layer/L0/q7/kv12               112.033 mJ/call     1.906 ms   58.8 W  meter  +3.6%  N=1070   rsd 0.6%  
+  [ 268/760] target/layer/L0/q8/kv1                 91.233 mJ/call     1.597 ms   57.2 W  meter  +5.9%  N=1290   rsd 0.6%  
+  [ 269/760] target/layer/L0/q8/kv2                 93.883 mJ/call     1.641 ms   57.2 W  meter  +6.2%  N=1253   rsd 0.7%  
+  [ 270/760] target/layer/L0/q8/kv3                 95.544 mJ/call     1.663 ms   57.5 W  meter  +5.5%  N=1225   rsd 0.5%    anchor 0.65x !!
+  [ 271/760] target/layer/L0/q8/kv4                 97.301 mJ/call     1.692 ms   57.5 W  meter  +5.2%  N=1193   rsd 0.5%    anchor 0.67x !!
+  [ 272/760] target/layer/L0/q8/kv7                103.558 mJ/call     1.778 ms   58.3 W  meter  +3.7%  N=1156   rsd 0.7%  
+  [ 273/760] target/layer/L0/q8/kv8                104.674 mJ/call     1.793 ms   58.4 W  meter  +3.5%  N=1150   rsd 0.7%  
+  [ 274/760] target/layer/L0/q8/kv11               111.897 mJ/call     1.906 ms   58.7 W  meter  +3.4%  N=1081   rsd 0.7%  
+  [ 275/760] target/layer/L0/q8/kv12               113.315 mJ/call     1.925 ms   58.9 W  meter  +3.4%  N=1079   rsd 0.5%  
+  [ 276/760] target/layer/L0/q9/kv1                 91.325 mJ/call     1.590 ms   57.4 W  meter  +5.9%  N=1294   rsd 0.4%  
+  [ 277/760] target/layer/L0/q9/kv2                 94.043 mJ/call     1.638 ms   57.4 W  meter  +6.4%  N=1243   rsd 0.4%  
+  [ 278/760] target/layer/L0/q9/kv3                 95.272 mJ/call     1.662 ms   57.3 W  meter  +5.5%  N=1217   rsd 0.4%    anchor 0.64x !!
+  [ 279/760] target/layer/L0/q9/kv4                 97.161 mJ/call     1.682 ms   57.8 W  meter  +5.1%  N=1234   rsd 0.5%    anchor 0.66x !!
+  [ 280/760] target/layer/L0/q9/kv7                103.532 mJ/call     1.773 ms   58.4 W  meter  +4.0%  N=1149   rsd 0.2%  
+  [ 281/760] target/layer/L0/q9/kv8                104.487 mJ/call     1.784 ms   58.6 W  meter  +3.5%  N=1131   rsd 0.4%  
+  [ 282/760] target/layer/L0/q9/kv11               111.787 mJ/call     1.905 ms   58.7 W  meter  +3.7%  N=1090   rsd 0.6%  
+  [ 283/760] target/layer/L0/q9/kv12               113.138 mJ/call     1.922 ms   58.9 W  meter  +3.4%  N=1051   rsd 0.4%  
+  [ 284/760] target/layer/L18/q1/kv1                53.855 mJ/call     1.029 ms   52.4 W  meter  +3.4%  N=1945   rsd 0.2%  
+  [ 285/760] target/layer/L18/q1/kv2                54.065 mJ/call     1.028 ms   52.6 W  meter  +3.9%  N=2018   rsd 0.5%  
+  [ 286/760] target/layer/L18/q1/kv3                54.431 mJ/call     1.038 ms   52.5 W  meter  +4.9%  N=1993   rsd 0.5%    anchor 0.72x !!
+  [ 287/760] target/layer/L18/q1/kv4                54.764 mJ/call     1.044 ms   52.4 W  meter  +4.0%  N=1957   rsd 0.6%    anchor 0.79x !!
+  [ 288/760] target/layer/L18/q1/kv7                54.536 mJ/call     1.027 ms   53.1 W  meter  +3.8%  N=1966   rsd 0.6%  
+  [ 289/760] target/layer/L18/q1/kv8                54.940 mJ/call     1.040 ms   52.8 W  meter  +5.0%  N=1949   rsd 0.3%  
+  [ 290/760] target/layer/L18/q1/kv11               55.139 mJ/call     1.030 ms   53.3 W  meter  +3.5%  N=1977   rsd 0.4%  
+  [ 291/760] target/layer/L18/q1/kv12               55.390 mJ/call     1.045 ms   53.1 W  meter  +4.3%  N=1970   rsd 0.9%  
+  [ 292/760] target/layer/L18/q2/kv1                67.614 mJ/call     1.180 ms   57.3 W  meter  +5.9%  N=1709   rsd 0.1%  
+  [ 293/760] target/layer/L18/q2/kv2                68.675 mJ/call     1.170 ms   58.6 W  meter  +6.4%  N=1758   rsd 0.1%  
+  [ 294/760] target/layer/L18/q2/kv3                70.285 mJ/call     1.182 ms   59.5 W  meter  +6.8%  N=1712   rsd 0.5%    anchor 0.77x !!
+  [ 295/760] target/layer/L18/q2/kv4                70.777 mJ/call     1.187 ms   59.5 W  meter  +5.1%  N=1750   rsd 0.6%    anchor 0.82x
+  [ 296/760] target/layer/L18/q2/kv7                76.508 mJ/call     1.285 ms   59.5 W  meter  +4.6%  N=1587   rsd 0.7%  
+  [ 297/760] target/layer/L18/q2/kv8                78.240 mJ/call     1.314 ms   59.5 W  meter  +3.6%  N=1599   rsd 0.5%  
+  [ 298/760] target/layer/L18/q2/kv11               84.359 mJ/call     1.418 ms   59.5 W  meter  +3.7%  N=1453   rsd 0.6%  
+  [ 299/760] target/layer/L18/q2/kv12               85.356 mJ/call     1.436 ms   59.4 W  meter  +3.8%  N=1435   rsd 0.7%  
+  [ 300/760] target/layer/L18/q3/kv1                80.945 mJ/call     1.362 ms   59.4 W  meter  +6.1%  N=1497   rsd 0.1%  
+  [ 301/760] target/layer/L18/q3/kv2                83.022 mJ/call     1.398 ms   59.4 W  meter  +5.6%  N=1458   rsd 0.8%  
+  [ 302/760] target/layer/L18/q3/kv3                84.905 mJ/call     1.433 ms   59.3 W  meter  +6.1%  N=1424   rsd 0.5%    anchor 1.05x
+  [ 303/760] target/layer/L18/q3/kv4                86.919 mJ/call     1.457 ms   59.6 W  meter  +5.5%  N=1413   rsd 0.5%    anchor 1.06x
+  [ 304/760] target/layer/L18/q3/kv7                92.746 mJ/call     1.553 ms   59.7 W  meter  +4.2%  N=1313   rsd 0.4%  
+  [ 305/760] target/layer/L18/q3/kv8                93.638 mJ/call     1.572 ms   59.5 W  meter  +3.5%  N=1298   rsd 0.6%  
+  [ 306/760] target/layer/L18/q3/kv11              100.715 mJ/call     1.695 ms   59.3 W  meter  +4.5%  N=1208   rsd 1.0%  
+  [ 307/760] target/layer/L18/q3/kv12              101.357 mJ/call     1.704 ms   59.5 W  meter  +3.9%  N=1221   rsd 0.5%  
+  [ 308/760] target/layer/L18/q4/kv1                89.329 mJ/call     1.555 ms   57.4 W  meter  +6.2%  N=1336   rsd 0.8%  
+  [ 309/760] target/layer/L18/q4/kv2                91.872 mJ/call     1.591 ms   57.8 W  meter  +5.6%  N=1294   rsd 0.7%  
+  [ 310/760] target/layer/L18/q4/kv3                92.819 mJ/call     1.608 ms   57.7 W  meter  +5.2%  N=1269   rsd 0.7%    anchor 1.03x
+  [ 311/760] target/layer/L18/q4/kv4                94.826 mJ/call     1.646 ms   57.7 W  meter  +5.8%  N=1275   rsd 0.7%    anchor 1.05x
+  [ 312/760] target/layer/L18/q4/kv7               101.817 mJ/call     1.732 ms   58.7 W  meter  +3.9%  N=1210   rsd 0.7%  
+  [ 313/760] target/layer/L18/q4/kv8               102.763 mJ/call     1.757 ms   58.5 W  meter  +3.8%  N=1173   rsd 0.5%  
+  [ 314/760] target/layer/L18/q4/kv11              109.304 mJ/call     1.852 ms   59.0 W  meter  +3.1%  N=1091   rsd 0.2%  
+  [ 315/760] target/layer/L18/q4/kv12              110.394 mJ/call     1.872 ms   59.0 W  meter  +3.1%  N=1111   rsd 0.2%  
+  [ 316/760] target/layer/L18/q5/kv1                90.128 mJ/call     1.570 ms   57.4 W  meter  +6.0%  N=1313   rsd 0.3%  
+  [ 317/760] target/layer/L18/q5/kv2                93.046 mJ/call     1.606 ms   58.0 W  meter  +5.7%  N=1281   rsd 0.8%  
+  [ 318/760] target/layer/L18/q5/kv3                95.031 mJ/call     1.648 ms   57.7 W  meter  +6.3%  N=1260   rsd 0.4%    anchor 1.05x
+  [ 319/760] target/layer/L18/q5/kv4                96.114 mJ/call     1.662 ms   57.8 W  meter  +5.4%  N=1240   rsd 0.7%    anchor 1.05x
+  [ 320/760] target/layer/L18/q5/kv7               102.021 mJ/call     1.753 ms   58.2 W  meter  +4.4%  N=1165   rsd 0.5%  
+  [ 321/760] target/layer/L18/q5/kv8               103.370 mJ/call     1.771 ms   58.4 W  meter  +4.1%  N=1139   rsd 0.4%  
+  [ 322/760] target/layer/L18/q5/kv11              110.171 mJ/call     1.867 ms   59.0 W  meter  +3.1%  N=1073   rsd 0.3%  
+  [ 323/760] target/layer/L18/q5/kv12              110.763 mJ/call     1.901 ms   58.3 W  meter  +3.8%  N=1053   rsd 0.2%  
+  [ 324/760] target/layer/L18/q6/kv1                90.126 mJ/call     1.581 ms   57.0 W  meter  +6.2%  N=1291   rsd 0.4%  
+  [ 325/760] target/layer/L18/q6/kv2                92.764 mJ/call     1.612 ms   57.5 W  meter  +5.5%  N=1275   rsd 0.6%  
+  [ 326/760] target/layer/L18/q6/kv3                93.991 mJ/call     1.644 ms   57.2 W  meter  +6.1%  N=1252   rsd 0.3%    anchor 1.04x
+  [ 327/760] target/layer/L18/q6/kv4                95.702 mJ/call     1.669 ms   57.3 W  meter  +5.3%  N=1221   rsd 0.5%    anchor 1.05x
+  [ 328/760] target/layer/L18/q6/kv7               102.389 mJ/call     1.770 ms   58.0 W  meter  +4.3%  N=1159   rsd 0.8%  
+  [ 329/760] target/layer/L18/q6/kv8               103.028 mJ/call     1.776 ms   58.1 W  meter  +3.9%  N=1138   rsd 0.4%  
+  [ 330/760] target/layer/L18/q6/kv11              110.230 mJ/call     1.886 ms   58.4 W  meter  +3.7%  N=1080   rsd 0.6%  
+  [ 331/760] target/layer/L18/q6/kv12              111.000 mJ/call     1.907 ms   58.2 W  meter  +3.6%  N=1080   rsd 0.8%  
+  [ 332/760] target/layer/L18/q7/kv1                89.911 mJ/call     1.574 ms   57.1 W  meter  +6.1%  N=1294   rsd 0.7%  
+  [ 333/760] target/layer/L18/q7/kv2                93.219 mJ/call     1.613 ms   57.4 W  meter  +5.5%  N=1278   rsd 1.0%  
+  [ 334/760] target/layer/L18/q7/kv3                94.406 mJ/call     1.648 ms   57.3 W  meter  +6.3%  N=1223   rsd 0.6%    anchor 1.05x
+  [ 335/760] target/layer/L18/q7/kv4                95.934 mJ/call     1.673 ms   57.4 W  meter  +5.6%  N=1219   rsd 0.7%    anchor 1.05x
+  [ 336/760] target/layer/L18/q7/kv7               102.195 mJ/call     1.755 ms   58.2 W  meter  +4.1%  N=1151   rsd 0.5%  
+  [ 337/760] target/layer/L18/q7/kv8               103.611 mJ/call     1.781 ms   58.2 W  meter  +4.2%  N=1134   rsd 0.7%  
+  [ 338/760] target/layer/L18/q7/kv11              110.564 mJ/call     1.891 ms   58.5 W  meter  +3.8%  N=1079   rsd 0.7%  
+  [ 339/760] target/layer/L18/q7/kv12              111.743 mJ/call     1.905 ms   58.6 W  meter  +3.7%  N=1078   rsd 0.7%  
+  [ 340/760] target/layer/L18/q8/kv1                91.576 mJ/call     1.607 ms   57.0 W  meter  +6.5%  N=1282   rsd 0.5%  
+  [ 341/760] target/layer/L18/q8/kv2                93.673 mJ/call     1.641 ms   56.9 W  meter  +6.2%  N=1267   rsd 0.9%  
+  [ 342/760] target/layer/L18/q8/kv3                95.156 mJ/call     1.663 ms   57.2 W  meter  +5.4%  N=1238   rsd 0.8%    anchor 1.04x
+  [ 343/760] target/layer/L18/q8/kv4                97.381 mJ/call     1.690 ms   57.6 W  meter  +5.0%  N=1230   rsd 0.8%    anchor 1.05x
+  [ 344/760] target/layer/L18/q8/kv7               103.489 mJ/call     1.776 ms   58.2 W  meter  +3.8%  N=1146   rsd 0.7%  
+  [ 345/760] target/layer/L18/q8/kv8               104.857 mJ/call     1.799 ms   58.3 W  meter  +3.7%  N=1155   rsd 0.3%  
+  [ 346/760] target/layer/L18/q8/kv11              111.487 mJ/call     1.903 ms   58.6 W  meter  +3.5%  N=1083   rsd 0.5%  
+  [ 347/760] target/layer/L18/q8/kv12              112.342 mJ/call     1.926 ms   58.4 W  meter  +3.4%  N=1058   rsd 0.8%  
+  [ 348/760] target/layer/L18/q9/kv1                91.457 mJ/call     1.593 ms   57.4 W  meter  +5.8%  N=1295   rsd 0.4%  
+  [ 349/760] target/layer/L18/q9/kv2                94.079 mJ/call     1.640 ms   57.4 W  meter  +6.2%  N=1245   rsd 0.4%  
+  [ 350/760] target/layer/L18/q9/kv3                95.920 mJ/call     1.666 ms   57.5 W  meter  +5.5%  N=1248   rsd 0.6%    anchor 1.05x
+  [ 351/760] target/layer/L18/q9/kv4                97.045 mJ/call     1.685 ms   57.7 W  meter  +5.4%  N=1221   rsd 0.2%    anchor 1.05x
+  [ 352/760] target/layer/L18/q9/kv7               103.453 mJ/call     1.776 ms   58.2 W  meter  +4.0%  N=1160   rsd 0.4%  
+  [ 353/760] target/layer/L18/q9/kv8               104.526 mJ/call     1.793 ms   58.3 W  meter  +3.9%  N=1160   rsd 0.6%  
+  [ 354/760] target/layer/L18/q9/kv11              111.360 mJ/call     1.900 ms   58.6 W  meter  +3.7%  N=1073   rsd 0.8%  
+  [ 355/760] target/layer/L18/q9/kv12              112.745 mJ/call     1.923 ms   58.6 W  meter  +3.6%  N=1050   rsd 0.6%  
+  [ 356/760] target/layer/L35/q1/kv1                54.144 mJ/call     1.050 ms   51.5 W  meter  +4.0%  N=1941   rsd 0.7%  
+  [ 357/760] target/layer/L35/q1/kv2                53.951 mJ/call     1.032 ms   52.1 W  meter  +2.5%  N=1952   rsd 0.4%  
+  [ 358/760] target/layer/L35/q1/kv3                54.025 mJ/call     1.031 ms   52.4 W  meter  +4.1%  N=1943   rsd 0.3%    anchor 0.73x !!
+  [ 359/760] target/layer/L35/q1/kv4                53.796 mJ/call     1.020 ms   52.7 W  meter  +3.1%  N=2003   rsd 0.2%    anchor 0.77x !!
+  [ 360/760] target/layer/L35/q1/kv7                54.271 mJ/call     1.028 ms   52.8 W  meter  +4.1%  N=2004   rsd 0.7%  
+  [ 361/760] target/layer/L35/q1/kv8                54.862 mJ/call     1.040 ms   52.9 W  meter  +5.0%  N=1978   rsd 0.9%  
+  [ 362/760] target/layer/L35/q1/kv11               55.281 mJ/call     1.049 ms   52.8 W  meter  +4.2%  N=1961   rsd 0.7%  
+  [ 363/760] target/layer/L35/q1/kv12               55.443 mJ/call     1.035 ms   53.0 W  meter  +3.5%  N=1982   rsd 0.8%  
+  [ 364/760] target/layer/L35/q2/kv1                67.585 mJ/call     1.194 ms   56.6 W  meter  +6.6%  N=1726   rsd 0.2%  
+  [ 365/760] target/layer/L35/q2/kv2                69.400 mJ/call     1.180 ms   58.8 W  meter  +6.0%  N=1745   rsd 0.4%  
+  [ 366/760] target/layer/L35/q2/kv3                70.250 mJ/call     1.193 ms   59.3 W  meter  +6.9%  N=1717   rsd 0.7%    anchor 0.78x !!
+  [ 367/760] target/layer/L35/q2/kv4                71.622 mJ/call     1.192 ms   60.1 W  meter  +6.0%  N=1724   rsd 0.7%    anchor 0.82x
+  [ 368/760] target/layer/L35/q2/kv7                76.777 mJ/call     1.289 ms   59.7 W  meter  +4.6%  N=1609   rsd 1.1%  
+  [ 369/760] target/layer/L35/q2/kv8                77.792 mJ/call     1.307 ms   59.5 W  meter  +4.6%  N=1577   rsd 0.6%  
+  [ 370/760] target/layer/L35/q2/kv11               85.062 mJ/call     1.419 ms   59.9 W  meter  +4.0%  N=1449   rsd 0.6%  
+  [ 371/760] target/layer/L35/q2/kv12               85.688 mJ/call     1.434 ms   59.7 W  meter  +3.9%  N=1435   rsd 0.6%  
+  [ 372/760] target/layer/L35/q3/kv1                80.812 mJ/call     1.364 ms   59.3 W  meter  +6.1%  N=1496   rsd 0.1%  
+  [ 373/760] target/layer/L35/q3/kv2                83.172 mJ/call     1.401 ms   59.4 W  meter  +5.6%  N=1472   rsd 0.2%  
+  [ 374/760] target/layer/L35/q3/kv3                85.095 mJ/call     1.434 ms   59.3 W  meter  +6.0%  N=1420   rsd 0.5%    anchor 1.04x
+  [ 375/760] target/layer/L35/q3/kv4                86.422 mJ/call     1.456 ms   59.4 W  meter  +5.7%  N=1389   rsd 0.3%    anchor 1.06x
+  [ 376/760] target/layer/L35/q3/kv7                92.554 mJ/call     1.552 ms   59.7 W  meter  +4.6%  N=1339   rsd 0.8%  
+  [ 377/760] target/layer/L35/q3/kv8                93.641 mJ/call     1.573 ms   59.5 W  meter  +4.3%  N=1310   rsd 0.9%  
+  [ 378/760] target/layer/L35/q3/kv11              100.082 mJ/call     1.680 ms   59.5 W  meter  +4.0%  N=1214   rsd 0.6%  
+  [ 379/760] target/layer/L35/q3/kv12              101.308 mJ/call     1.702 ms   59.4 W  meter  +3.9%  N=1211   rsd 0.8%  
+  [ 380/760] target/layer/L35/q4/kv1                88.924 mJ/call     1.560 ms   57.1 W  meter  +6.3%  N=1321   rsd 0.6%  
+  [ 381/760] target/layer/L35/q4/kv2                91.213 mJ/call     1.592 ms   57.3 W  meter  +5.7%  N=1279   rsd 0.5%  
+  [ 382/760] target/layer/L35/q4/kv3                92.548 mJ/call     1.612 ms   57.4 W  meter  +5.5%  N=1288   rsd 0.5%    anchor 1.04x
+  [ 383/760] target/layer/L35/q4/kv4                94.909 mJ/call     1.650 ms   57.5 W  meter  +6.0%  N=1245   rsd 0.4%    anchor 1.05x
+  [ 384/760] target/layer/L35/q4/kv7               101.168 mJ/call     1.741 ms   58.1 W  meter  +4.1%  N=1183   rsd 0.5%  
+  [ 385/760] target/layer/L35/q4/kv8               102.127 mJ/call     1.755 ms   58.2 W  meter  +3.9%  N=1171   rsd 0.2%  
+  [ 386/760] target/layer/L35/q4/kv11              108.981 mJ/call     1.853 ms   58.8 W  meter  +3.1%  N=1098   rsd 0.3%  
+  [ 387/760] target/layer/L35/q4/kv12              110.734 mJ/call     1.890 ms   58.6 W  meter  +3.8%  N=1068   rsd 0.2%  
+  [ 388/760] target/layer/L35/q5/kv1                89.594 mJ/call     1.568 ms   57.2 W  meter  +6.1%  N=1313   rsd 0.7%  
+  [ 389/760] target/layer/L35/q5/kv2                92.201 mJ/call     1.606 ms   57.4 W  meter  +5.5%  N=1282   rsd 0.6%  
+  [ 390/760] target/layer/L35/q5/kv3                93.536 mJ/call     1.636 ms   57.2 W  meter  +6.1%  N=1248   rsd 0.7%    anchor 1.04x
+  [ 391/760] target/layer/L35/q5/kv4                94.986 mJ/call     1.658 ms   57.3 W  meter  +5.2%  N=1244   rsd 0.8%    anchor 1.05x
+  [ 392/760] target/layer/L35/q5/kv7               101.669 mJ/call     1.743 ms   58.4 W  meter  +4.0%  N=1181   rsd 0.7%  
+  [ 393/760] target/layer/L35/q5/kv8               102.922 mJ/call     1.766 ms   58.3 W  meter  +3.7%  N=1152   rsd 0.5%  
+  [ 394/760] target/layer/L35/q5/kv11              109.644 mJ/call     1.864 ms   58.8 W  meter  +3.1%  N=1083   rsd 0.3%  
+  [ 395/760] target/layer/L35/q5/kv12              111.152 mJ/call     1.895 ms   58.7 W  meter  +3.6%  N=1097   rsd 0.5%  
+  [ 396/760] target/layer/L35/q6/kv1                89.866 mJ/call     1.571 ms   57.2 W  meter  +6.1%  N=1310   rsd 0.6%  
+  [ 397/760] target/layer/L35/q6/kv2                92.329 mJ/call     1.610 ms   57.3 W  meter  +5.6%  N=1269   rsd 0.6%  
+  [ 398/760] target/layer/L35/q6/kv3                94.511 mJ/call     1.651 ms   57.3 W  meter  +6.2%  N=1248   rsd 0.8%    anchor 1.05x
+  [ 399/760] target/layer/L35/q6/kv4                96.645 mJ/call     1.673 ms   57.7 W  meter  +5.3%  N=1229   rsd 0.4%    anchor 1.05x
+  [ 400/760] target/layer/L35/q6/kv7               102.487 mJ/call     1.757 ms   58.3 W  meter  +4.0%  N=1172   rsd 0.4%  
+  [ 401/760] target/layer/L35/q6/kv8               103.587 mJ/call     1.771 ms   58.5 W  meter  +3.6%  N=1141   rsd 0.1%  
+  [ 402/760] target/layer/L35/q6/kv11              110.492 mJ/call     1.870 ms   59.1 W  meter  +3.0%  N=1081   rsd 0.4%  
+  [ 403/760] target/layer/L35/q6/kv12              112.161 mJ/call     1.903 ms   58.9 W  meter  +3.5%  N=1091   rsd 0.6%  
+  [ 404/760] target/layer/L35/q7/kv1                90.511 mJ/call     1.571 ms   57.6 W  meter  +6.0%  N=1299   rsd 0.5%  
+  [ 405/760] target/layer/L35/q7/kv2                93.290 mJ/call     1.608 ms   58.0 W  meter  +5.4%  N=1268   rsd 0.6%  
+  [ 406/760] target/layer/L35/q7/kv3                94.871 mJ/call     1.642 ms   57.8 W  meter  +5.9%  N=1243   rsd 0.6%    anchor 1.04x
+  [ 407/760] target/layer/L35/q7/kv4                96.749 mJ/call     1.662 ms   58.2 W  meter  +5.1%  N=1249   rsd 0.7%    anchor 1.05x
+  [ 408/760] target/layer/L35/q7/kv7               102.792 mJ/call     1.749 ms   58.8 W  meter  +3.9%  N=1154   rsd 0.2%  
+  [ 409/760] target/layer/L35/q7/kv8               104.253 mJ/call     1.771 ms   58.9 W  meter  +3.8%  N=1152   rsd 0.6%  
+  [ 410/760] target/layer/L35/q7/kv11              111.482 mJ/call     1.889 ms   59.0 W  meter  +3.8%  N=1090   rsd 0.6%  
+  [ 411/760] target/layer/L35/q7/kv12              113.084 mJ/call     1.907 ms   59.3 W  meter  +3.7%  N=1079   rsd 0.8%  
+  [ 412/760] target/layer/L35/q8/kv1                91.845 mJ/call     1.590 ms   57.8 W  meter  +6.0%  N=1294   rsd 0.6%  
+  [ 413/760] target/layer/L35/q8/kv2                94.852 mJ/call     1.643 ms   57.8 W  meter  +6.3%  N=1240   rsd 0.6%  
+  [ 414/760] target/layer/L35/q8/kv3                95.813 mJ/call     1.657 ms   57.8 W  meter  +5.5%  N=1243   rsd 0.5%    anchor 1.04x
+  [ 415/760] target/layer/L35/q8/kv4                97.857 mJ/call     1.685 ms   58.0 W  meter  +5.0%  N=1210   rsd 0.7%    anchor 1.05x
+  [ 416/760] target/layer/L35/q8/kv7               104.573 mJ/call     1.779 ms   58.8 W  meter  +3.8%  N=1158   rsd 0.6%  
+  [ 417/760] target/layer/L35/q8/kv8               105.477 mJ/call     1.790 ms   58.9 W  meter  +3.6%  N=1138   rsd 0.2%  
+  [ 418/760] target/layer/L35/q8/kv11              112.752 mJ/call     1.903 ms   59.2 W  meter  +3.4%  N=1070   rsd 0.6%  
+  [ 419/760] target/layer/L35/q8/kv12              114.016 mJ/call     1.921 ms   59.3 W  meter  +3.3%  N=1092   rsd 0.4%  
+  [ 420/760] target/layer/L35/q9/kv1                92.137 mJ/call     1.593 ms   57.8 W  meter  +5.9%  N=1281   rsd 0.6%  
+  [ 421/760] target/layer/L35/q9/kv2                94.212 mJ/call     1.618 ms   58.2 W  meter  +5.2%  N=1298   rsd 0.4%  
+  [ 422/760] target/layer/L35/q9/kv3                96.116 mJ/call     1.654 ms   58.2 W  meter  +5.4%  N=1233   rsd 0.6%    anchor 1.04x
+  [ 423/760] target/layer/L35/q9/kv4                97.863 mJ/call     1.677 ms   58.3 W  meter  +4.9%  N=1215   rsd 0.4%    anchor 1.05x
+  [ 424/760] target/layer/L35/q9/kv7               104.321 mJ/call     1.774 ms   58.7 W  meter  +3.9%  N=1161   rsd 0.5%  
+  [ 425/760] target/layer/L35/q9/kv8               105.608 mJ/call     1.788 ms   59.1 W  meter  +3.5%  N=1129   rsd 0.5%  
+  [ 426/760] target/layer/L35/q9/kv11              112.800 mJ/call     1.897 ms   59.5 W  meter  +3.5%  N=1073   rsd 0.6%  
+  [ 427/760] target/layer/L35/q9/kv12              113.754 mJ/call     1.915 ms   59.4 W  meter  +3.5%  N=1062   rsd 0.8%  
+  [ 428/760] target/attn/L0/q1/kv1                  17.740 mJ/call     0.515 ms   34.5 W  meter  +0.5%  N=3921   rsd 0.5%  
+  [ 429/760] target/attn/L0/q1/kv2                  17.643 mJ/call     0.516 ms   34.2 W  meter  +0.6%  N=3946   rsd 0.5%  
+  [ 430/760] target/attn/L0/q1/kv3                  17.921 mJ/call     0.526 ms   34.1 W  meter  +2.3%  N=3801   rsd 2.3%    anchor 0.78x !!
+  [ 431/760] target/attn/L0/q1/kv4                  18.310 mJ/call     0.538 ms   34.0 W  meter  +4.4%  N=3770   rsd 2.1%    anchor 0.80x !!
+  [ 432/760] target/attn/L0/q1/kv7                  18.063 mJ/call     0.522 ms   34.8 W  meter  -1.9%  N=3961   rsd 0.7%  
+  [ 433/760] target/attn/L0/q1/kv8                  18.299 mJ/call     0.525 ms   34.8 W  meter  +1.6%  N=3835   rsd 0.7%  
+  [ 434/760] target/attn/L0/q1/kv11                 18.535 mJ/call     0.527 ms   35.5 W  meter  +2.5%  N=4000   rsd 1.0%  
+  [ 435/760] target/attn/L0/q1/kv12                 18.583 mJ/call     0.525 ms   35.6 W  meter  +1.8%  N=3964   rsd 0.7%  
+  [ 436/760] target/attn/L0/q2/kv1                  23.250 mJ/call     0.631 ms   36.8 W  meter  +0.8%  N=3201   rsd 0.1%  
+  [ 437/760] target/attn/L0/q2/kv2                  24.613 mJ/call     0.636 ms   38.7 W  meter  +0.8%  N=3208   rsd 0.7%  
+  [ 438/760] target/attn/L0/q2/kv3                  25.133 mJ/call     0.630 ms   39.9 W  meter  -0.3%  N=3230   rsd 0.7%    anchor 0.78x !!
+  [ 439/760] target/attn/L0/q2/kv4                  25.970 mJ/call     0.624 ms   41.6 W  meter  +0.3%  N=3256   rsd 0.5%    anchor 0.77x !!
+  [ 440/760] target/attn/L0/q2/kv7                  30.043 mJ/call     0.630 ms   47.7 W  meter  +1.0%  N=3266   rsd 0.6%  
+  [ 441/760] target/attn/L0/q2/kv8                  30.827 mJ/call     0.635 ms   48.4 W  meter  +1.8%  N=3267   rsd 0.8%  
+  [ 442/760] target/attn/L0/q2/kv11                 35.081 mJ/call     0.639 ms   54.6 W  meter  +1.5%  N=3227   rsd 0.7%  
+  [ 443/760] target/attn/L0/q2/kv12                 35.964 mJ/call     0.641 ms   56.0 W  meter  +3.4%  N=3210   rsd 0.9%  
+  [ 444/760] target/attn/L0/q3/kv1                  24.537 mJ/call     0.634 ms   38.7 W  meter  +1.1%  N=3252   rsd 0.2%  
+  [ 445/760] target/attn/L0/q3/kv2                  25.575 mJ/call     0.637 ms   40.4 W  meter  +2.6%  N=3302   rsd 0.5%  
+  [ 446/760] target/attn/L0/q3/kv3                  26.501 mJ/call     0.636 ms   41.6 W  meter  +0.5%  N=3230   rsd 0.8%    anchor 0.75x !!
+  [ 447/760] target/attn/L0/q3/kv4                  27.080 mJ/call     0.632 ms   42.9 W  meter  +0.6%  N=3256   rsd 0.8%    anchor 0.76x !!
+  [ 448/760] target/attn/L0/q3/kv7                  31.437 mJ/call     0.648 ms   48.6 W  meter  +3.2%  N=3232   rsd 0.5%  
+  [ 449/760] target/attn/L0/q3/kv8                  32.226 mJ/call     0.654 ms   49.1 W  meter  +1.3%  N=3118   rsd 0.9%  
+  [ 450/760] target/attn/L0/q3/kv11                 36.277 mJ/call     0.642 ms   56.0 W  meter  -0.5%  N=3185   rsd 1.3%  
+  [ 451/760] target/attn/L0/q3/kv12                 37.133 mJ/call     0.651 ms   56.6 W  meter  +3.9%  N=3187   rsd 0.5%  
+  [ 452/760] target/attn/L0/q4/kv1                  24.793 mJ/call     0.635 ms   39.1 W  meter  +1.5%  N=3207   rsd 0.9%  
+  [ 453/760] target/attn/L0/q4/kv2                  25.906 mJ/call     0.632 ms   40.8 W  meter  +0.5%  N=3259   rsd 0.4%  
+  [ 454/760] target/attn/L0/q4/kv3                  27.044 mJ/call     0.637 ms   42.5 W  meter  +1.5%  N=3168   rsd 0.6%    anchor 0.70x !!
+  [ 455/760] target/attn/L0/q4/kv4                  28.235 mJ/call     0.643 ms   43.7 W  meter  +1.3%  N=3160   rsd 1.3%    anchor 0.74x !!
+  [ 456/760] target/attn/L0/q4/kv7                  31.501 mJ/call     0.630 ms   49.7 W  meter  +1.2%  N=3281   rsd 0.9%  
+  [ 457/760] target/attn/L0/q4/kv8                  32.295 mJ/call     0.637 ms   50.4 W  meter  +1.9%  N=3194   rsd 0.9%  
+  [ 458/760] target/attn/L0/q4/kv11                 36.473 mJ/call     0.651 ms   56.1 W  meter  +2.4%  N=3171   rsd 0.7%  
+  [ 459/760] target/attn/L0/q4/kv12                 38.168 mJ/call     0.672 ms   56.7 W  meter  +2.4%  N=3061   rsd 0.7%  
+  [ 460/760] target/attn/L0/q5/kv1                  24.927 mJ/call     0.631 ms   39.5 W  meter  +0.9%  N=3201   rsd 0.2%  
+  [ 461/760] target/attn/L0/q5/kv2                  26.433 mJ/call     0.643 ms   41.1 W  meter  +2.5%  N=3147   rsd 0.7%  
+  [ 462/760] target/attn/L0/q5/kv3                  27.124 mJ/call     0.639 ms   42.2 W  meter  +0.8%  N=3184   rsd 0.4%    anchor 0.72x !!
+  [ 463/760] target/attn/L0/q5/kv4                  28.314 mJ/call     0.650 ms   43.5 W  meter  +3.7%  N=3169   rsd 0.4%    anchor 0.74x !!
+  [ 464/760] target/attn/L0/q5/kv7                  32.135 mJ/call     0.656 ms   49.2 W  meter  +1.8%  N=3152   rsd 0.7%  
+  [ 465/760] target/attn/L0/q5/kv8                  32.735 mJ/call     0.646 ms   50.5 W  meter  +0.7%  N=3182   rsd 0.6%  
+  [ 466/760] target/attn/L0/q5/kv11                 37.333 mJ/call     0.660 ms   56.5 W  meter  +2.3%  N=3145   rsd 0.7%  
+  [ 467/760] target/attn/L0/q5/kv12                 38.966 mJ/call     0.687 ms   56.7 W  meter  +2.4%  N=2998   rsd 0.8%  
+  [ 468/760] target/attn/L0/q6/kv1                  25.382 mJ/call     0.647 ms   39.2 W  meter  +1.2%  N=3151   rsd 0.4%  
+  [ 469/760] target/attn/L0/q6/kv2                  26.193 mJ/call     0.631 ms   41.5 W  meter  +0.9%  N=3201   rsd 0.3%  
+  [ 470/760] target/attn/L0/q6/kv3                  27.434 mJ/call     0.649 ms   42.2 W  meter  +2.9%  N=3147   rsd 0.2%    anchor 0.73x !!
+  [ 471/760] target/attn/L0/q6/kv4                  28.571 mJ/call     0.651 ms   43.9 W  meter  +1.4%  N=3124   rsd 0.6%    anchor 0.72x !!
+  [ 472/760] target/attn/L0/q6/kv7                  32.106 mJ/call     0.649 ms   49.5 W  meter  +1.6%  N=3112   rsd 0.5%  
+  [ 473/760] target/attn/L0/q6/kv8                  32.597 mJ/call     0.644 ms   50.8 W  meter  +0.9%  N=3179   rsd 0.7%  
+  [ 474/760] target/attn/L0/q6/kv11                 37.296 mJ/call     0.665 ms   56.1 W  meter  +2.4%  N=3162   rsd 0.5%  
+  [ 475/760] target/attn/L0/q6/kv12                 39.352 mJ/call     0.694 ms   56.7 W  meter  +2.3%  N=2968   rsd 0.8%  
+  [ 476/760] target/attn/L0/q7/kv1                  25.095 mJ/call     0.638 ms   39.4 W  meter  +1.2%  N=3201   rsd 0.8%  
+  [ 477/760] target/attn/L0/q7/kv2                  26.530 mJ/call     0.639 ms   41.5 W  meter  +1.9%  N=3168   rsd 0.6%  
+  [ 478/760] target/attn/L0/q7/kv3                  27.693 mJ/call     0.641 ms   43.2 W  meter  +1.2%  N=3159   rsd 0.3%    anchor 0.72x !!
+  [ 479/760] target/attn/L0/q7/kv4                  28.469 mJ/call     0.642 ms   44.2 W  meter  +1.6%  N=3178   rsd 0.5%    anchor 0.71x !!
+  [ 480/760] target/attn/L0/q7/kv7                  32.510 mJ/call     0.650 ms   50.0 W  meter  +1.7%  N=3138   rsd 0.8%  
+  [ 481/760] target/attn/L0/q7/kv8                  33.124 mJ/call     0.651 ms   50.8 W  meter  +1.5%  N=3194   rsd 0.7%  
+  [ 482/760] target/attn/L0/q7/kv11                 37.781 mJ/call     0.667 ms   56.7 W  meter  +2.4%  N=3090   rsd 0.6%  
+  [ 483/760] target/attn/L0/q7/kv12                 39.171 mJ/call     0.686 ms   57.1 W  meter  +2.4%  N=3057   rsd 0.5%  
+  [ 484/760] target/attn/L0/q8/kv1                  25.654 mJ/call     0.648 ms   39.6 W  meter  +1.2%  N=3146   rsd 0.6%  
+  [ 485/760] target/attn/L0/q8/kv2                  27.134 mJ/call     0.644 ms   41.8 W  meter  +1.3%  N=3159   rsd 0.6%  
+  [ 486/760] target/attn/L0/q8/kv3                  27.582 mJ/call     0.639 ms   43.0 W  meter  -1.1%  N=3215   rsd 0.6%    anchor 0.69x !!
+  [ 487/760] target/attn/L0/q8/kv4                  28.415 mJ/call     0.639 ms   44.5 W  meter  +1.0%  N=3221   rsd 0.7%    anchor 0.70x !!
+  [ 488/760] target/attn/L0/q8/kv7                  32.230 mJ/call     0.644 ms   50.4 W  meter  +1.1%  N=3210   rsd 0.6%  
+  [ 489/760] target/attn/L0/q8/kv8                  32.915 mJ/call     0.648 ms   50.9 W  meter  +1.8%  N=3188   rsd 0.6%  
+  [ 490/760] target/attn/L0/q8/kv11                 38.186 mJ/call     0.686 ms   55.7 W  meter  +2.1%  N=2978   rsd 0.8%  
+  [ 491/760] target/attn/L0/q8/kv12                 39.245 mJ/call     0.701 ms   56.0 W  meter  +2.1%  N=2941   rsd 0.6%  
+  [ 492/760] target/attn/L0/q9/kv1                  25.333 mJ/call     0.643 ms   39.4 W  meter  +1.3%  N=3141   rsd 0.5%  
+  [ 493/760] target/attn/L0/q9/kv2                  26.882 mJ/call     0.643 ms   41.8 W  meter  +1.1%  N=3199   rsd 0.6%  
+  [ 494/760] target/attn/L0/q9/kv3                  27.667 mJ/call     0.648 ms   42.9 W  meter  +1.1%  N=3165   rsd 1.1%    anchor 0.69x !!
+  [ 495/760] target/attn/L0/q9/kv4                  28.541 mJ/call     0.643 ms   44.4 W  meter  +1.4%  N=3214   rsd 0.4%    anchor 0.69x !!
+  [ 496/760] target/attn/L0/q9/kv7                  32.217 mJ/call     0.646 ms   49.8 W  meter  +1.9%  N=3154   rsd 0.7%  
+  [ 497/760] target/attn/L0/q9/kv8                  33.162 mJ/call     0.655 ms   50.7 W  meter  +3.0%  N=3121   rsd 0.7%  
+  [ 498/760] target/attn/L0/q9/kv11                 37.769 mJ/call     0.667 ms   56.7 W  meter  +2.3%  N=3087   rsd 0.8%  
+  [ 499/760] target/attn/L0/q9/kv12                 38.951 mJ/call     0.693 ms   56.2 W  meter  +2.2%  N=2947   rsd 0.8%  
+  [ 500/760] target/attn/L18/q1/kv1                 17.625 mJ/call     0.517 ms   34.0 W  meter  +1.0%  N=3946   rsd 0.6%  
+  [ 501/760] target/attn/L18/q1/kv2                 17.661 mJ/call     0.518 ms   34.1 W  meter  +0.8%  N=3920   rsd 0.6%  
+  [ 502/760] target/attn/L18/q1/kv3                 17.960 mJ/call     0.529 ms   34.0 W  meter  +1.1%  N=3794   rsd 0.4%    anchor 0.89x
+  [ 503/760] target/attn/L18/q1/kv4                 17.800 mJ/call     0.522 ms   34.1 W  meter  +1.1%  N=3828   rsd 0.4%    anchor 0.92x
+  [ 504/760] target/attn/L18/q1/kv7                 18.239 mJ/call     0.524 ms   34.5 W  meter  +1.3%  N=3886   rsd 1.0%  
+  [ 505/760] target/attn/L18/q1/kv8                 18.075 mJ/call     0.520 ms   34.8 W  meter  +0.6%  N=3987   rsd 1.2%  
+  [ 506/760] target/attn/L18/q1/kv11                18.334 mJ/call     0.521 ms   35.2 W  meter  +0.8%  N=3921   rsd 0.4%  
+  [ 507/760] target/attn/L18/q1/kv12                18.469 mJ/call     0.524 ms   35.3 W  meter  +0.9%  N=3896   rsd 0.5%  
+  [ 508/760] target/attn/L18/q2/kv1                 22.504 mJ/call     0.622 ms   36.2 W  meter  +0.8%  N=3252   rsd 0.3%  
+  [ 509/760] target/attn/L18/q2/kv2                 23.965 mJ/call     0.621 ms   38.6 W  meter  +2.0%  N=3321   rsd 0.8%  
+  [ 510/760] target/attn/L18/q2/kv3                 25.078 mJ/call     0.632 ms   39.6 W  meter  +0.8%  N=3226   rsd 0.4%    anchor 1.37x !!
+  [ 511/760] target/attn/L18/q2/kv4                 25.922 mJ/call     0.629 ms   41.1 W  meter  +0.5%  N=3243   rsd 0.3%    anchor 1.42x !!
+  [ 512/760] target/attn/L18/q2/kv7                 29.426 mJ/call     0.626 ms   46.9 W  meter  +1.2%  N=3286   rsd 0.9%  
+  [ 513/760] target/attn/L18/q2/kv8                 30.868 mJ/call     0.642 ms   48.5 W  meter  +3.9%  N=3192   rsd 1.0%  
+  [ 514/760] target/attn/L18/q2/kv11                35.215 mJ/call     0.653 ms   53.8 W  meter  +2.0%  N=3150   rsd 0.4%  
+  [ 515/760] target/attn/L18/q2/kv12                35.574 mJ/call     0.642 ms   55.3 W  meter  +1.3%  N=3194   rsd 0.9%  
+  [ 516/760] target/attn/L18/q3/kv1                 24.065 mJ/call     0.625 ms   38.4 W  meter  +0.5%  N=3225   rsd 0.6%  
+  [ 517/760] target/attn/L18/q3/kv2                 25.411 mJ/call     0.627 ms   40.5 W  meter  +0.8%  N=3286   rsd 0.3%  
+  [ 518/760] target/attn/L18/q3/kv3                 26.171 mJ/call     0.625 ms   42.0 W  meter  +0.9%  N=3294   rsd 0.8%    anchor 1.83x !!
+  [ 519/760] target/attn/L18/q3/kv4                 27.343 mJ/call     0.630 ms   43.2 W  meter  +3.4%  N=3298   rsd 0.8%    anchor 1.76x !!
+  [ 520/760] target/attn/L18/q3/kv7                 31.346 mJ/call     0.643 ms   48.9 W  meter  +1.0%  N=3200   rsd 0.6%  
+  [ 521/760] target/attn/L18/q3/kv8                 31.873 mJ/call     0.636 ms   50.0 W  meter  +1.6%  N=3221   rsd 1.0%  
+  [ 522/760] target/attn/L18/q3/kv11                36.210 mJ/call     0.656 ms   55.7 W  meter  +5.0%  N=3153   rsd 0.9%  
+  [ 523/760] target/attn/L18/q3/kv12                36.690 mJ/call     0.648 ms   56.3 W  meter  +2.7%  N=3179   rsd 0.7%  
+  [ 524/760] target/attn/L18/q4/kv1                 24.837 mJ/call     0.647 ms   38.4 W  meter  +1.3%  N=3125   rsd 0.2%  
+  [ 525/760] target/attn/L18/q4/kv2                 25.780 mJ/call     0.630 ms   40.6 W  meter  -0.2%  N=3253   rsd 0.6%  
+  [ 526/760] target/attn/L18/q4/kv3                 26.601 mJ/call     0.632 ms   42.1 W  meter  +1.1%  N=3195   rsd 0.6%    anchor 1.64x !!
+  [ 527/760] target/attn/L18/q4/kv4                 27.569 mJ/call     0.631 ms   43.3 W  meter  +1.0%  N=3217   rsd 0.6%    anchor 1.57x !!
+  [ 528/760] target/attn/L18/q4/kv7                 31.601 mJ/call     0.641 ms   49.1 W  meter  +1.1%  N=3211   rsd 0.9%  
+  [ 529/760] target/attn/L18/q4/kv8                 32.386 mJ/call     0.648 ms   50.0 W  meter  +1.2%  N=3203   rsd 0.4%  
+  [ 530/760] target/attn/L18/q4/kv11                36.651 mJ/call     0.657 ms   55.8 W  meter  +2.3%  N=3141   rsd 0.7%  
+  [ 531/760] target/attn/L18/q4/kv12                38.252 mJ/call     0.675 ms   56.7 W  meter  +2.4%  N=3076   rsd 0.7%  
+  [ 532/760] target/attn/L18/q5/kv1                 25.143 mJ/call     0.643 ms   39.2 W  meter  +0.9%  N=3163   rsd 0.7%  
+  [ 533/760] target/attn/L18/q5/kv2                 26.382 mJ/call     0.645 ms   40.8 W  meter  +1.1%  N=3158   rsd 0.6%  
+  [ 534/760] target/attn/L18/q5/kv3                 27.233 mJ/call     0.644 ms   42.2 W  meter  +1.2%  N=3230   rsd 0.8%    anchor 1.64x !!
+  [ 535/760] target/attn/L18/q5/kv4                 28.097 mJ/call     0.642 ms   43.7 W  meter  +1.0%  N=3174   rsd 0.7%    anchor 1.56x !!
+  [ 536/760] target/attn/L18/q5/kv7                 31.805 mJ/call     0.648 ms   49.2 W  meter  +1.5%  N=3181   rsd 0.7%  
+  [ 537/760] target/attn/L18/q5/kv8                 32.726 mJ/call     0.648 ms   50.4 W  meter  +1.7%  N=3210   rsd 0.6%  
+  [ 538/760] target/attn/L18/q5/kv11                37.293 mJ/call     0.664 ms   55.7 W  meter  +2.4%  N=3100   rsd 0.8%  
+  [ 539/760] target/attn/L18/q5/kv12                38.237 mJ/call     0.682 ms   56.1 W  meter  +2.3%  N=3084   rsd 0.6%  
+  [ 540/760] target/attn/L18/q6/kv1                 25.071 mJ/call     0.635 ms   39.5 W  meter  +1.8%  N=3170   rsd 0.8%  
+  [ 541/760] target/attn/L18/q6/kv2                 26.402 mJ/call     0.637 ms   41.5 W  meter  +1.4%  N=3197   rsd 0.4%  
+  [ 542/760] target/attn/L18/q6/kv3                 27.667 mJ/call     0.651 ms   42.4 W  meter  +2.0%  N=3101   rsd 0.4%    anchor 1.65x !!
+  [ 543/760] target/attn/L18/q6/kv4                 28.484 mJ/call     0.652 ms   43.7 W  meter  +2.3%  N=3138   rsd 0.8%    anchor 1.56x !!
+  [ 544/760] target/attn/L18/q6/kv7                 32.264 mJ/call     0.654 ms   49.4 W  meter  +1.3%  N=3123   rsd 0.8%  
+  [ 545/760] target/attn/L18/q6/kv8                 32.845 mJ/call     0.640 ms   51.3 W  meter  +1.1%  N=3217   rsd 0.8%  
+  [ 546/760] target/attn/L18/q6/kv11                37.401 mJ/call     0.664 ms   56.3 W  meter  +2.3%  N=3074   rsd 0.7%  
+  [ 547/760] target/attn/L18/q6/kv12                38.761 mJ/call     0.684 ms   56.7 W  meter  +2.3%  N=3065   rsd 0.6%  
+  [ 548/760] target/attn/L18/q7/kv1                 25.393 mJ/call     0.632 ms   40.1 W  meter  +1.3%  N=3223   rsd 0.3%  
+  [ 549/760] target/attn/L18/q7/kv2                 26.759 mJ/call     0.644 ms   41.5 W  meter  +1.3%  N=3200   rsd 0.5%  
+  [ 550/760] target/attn/L18/q7/kv3                 27.961 mJ/call     0.652 ms   42.8 W  meter  +2.0%  N=3120   rsd 0.8%    anchor 1.67x !!
+  [ 551/760] target/attn/L18/q7/kv4                 28.877 mJ/call     0.650 ms   44.2 W  meter  -0.7%  N=3185   rsd 1.0%    anchor 1.58x !!
+  [ 552/760] target/attn/L18/q7/kv7                 32.629 mJ/call     0.653 ms   50.2 W  meter  +3.7%  N=3199   rsd 0.9%  
+  [ 553/760] target/attn/L18/q7/kv8                 33.686 mJ/call     0.663 ms   50.9 W  meter  +2.4%  N=3105   rsd 0.8%  
+  [ 554/760] target/attn/L18/q7/kv11                37.415 mJ/call     0.665 ms   56.2 W  meter  +2.6%  N=3071   rsd 0.8%  
+  [ 555/760] target/attn/L18/q7/kv12                38.622 mJ/call     0.680 ms   56.5 W  meter  +2.3%  N=3085   rsd 0.5%  
+  [ 556/760] target/attn/L18/q8/kv1                 25.532 mJ/call     0.641 ms   39.8 W  meter  +0.7%  N=3146   rsd 0.5%  
+  [ 557/760] target/attn/L18/q8/kv2                 26.691 mJ/call     0.637 ms   42.1 W  meter  +1.4%  N=3244   rsd 0.7%  
+  [ 558/760] target/attn/L18/q8/kv3                 27.578 mJ/call     0.641 ms   43.1 W  meter  +1.8%  N=3207   rsd 1.0%    anchor 1.55x !!
+  [ 559/760] target/attn/L18/q8/kv4                 28.621 mJ/call     0.642 ms   44.6 W  meter  +0.3%  N=3139   rsd 0.6%    anchor 1.49x !!
+  [ 560/760] target/attn/L18/q8/kv7                 32.218 mJ/call     0.640 ms   50.4 W  meter  +0.1%  N=3216   rsd 0.8%  
+  [ 561/760] target/attn/L18/q8/kv8                 32.863 mJ/call     0.638 ms   51.5 W  meter  +1.4%  N=3203   rsd 0.6%  
+  [ 562/760] target/attn/L18/q8/kv11                38.398 mJ/call     0.681 ms   56.4 W  meter  +2.2%  N=3050   rsd 0.7%  
+  [ 563/760] target/attn/L18/q8/kv12                39.212 mJ/call     0.698 ms   56.2 W  meter  +2.1%  N=2950   rsd 0.6%  
+  [ 564/760] target/attn/L18/q9/kv1                 25.276 mJ/call     0.635 ms   39.9 W  meter  +1.2%  N=3212   rsd 0.7%  
+  [ 565/760] target/attn/L18/q9/kv2                 26.345 mJ/call     0.630 ms   41.8 W  meter  +1.4%  N=3238   rsd 0.3%  
+  [ 566/760] target/attn/L18/q9/kv3                 27.442 mJ/call     0.636 ms   43.2 W  meter  +1.1%  N=3272   rsd 0.5%    anchor 1.59x !!
+  [ 567/760] target/attn/L18/q9/kv4                 28.184 mJ/call     0.629 ms   44.7 W  meter  +0.3%  N=3235   rsd 0.5%    anchor 1.50x !!
+  [ 568/760] target/attn/L18/q9/kv7                 31.798 mJ/call     0.634 ms   50.2 W  meter  +1.2%  N=3244   rsd 0.7%  
+  [ 569/760] target/attn/L18/q9/kv8                 32.868 mJ/call     0.647 ms   50.8 W  meter  +2.9%  N=3164   rsd 0.8%  
+  [ 570/760] target/attn/L18/q9/kv11                37.286 mJ/call     0.665 ms   56.1 W  meter  +2.3%  N=3162   rsd 0.5%  
+  [ 571/760] target/attn/L18/q9/kv12                38.835 mJ/call     0.690 ms   56.2 W  meter  +2.2%  N=3046   rsd 0.6%  
+  [ 572/760] target/attn/L35/q1/kv1                 17.607 mJ/call     0.515 ms   34.1 W  meter  +1.4%  N=3921   rsd 0.4%  
+  [ 573/760] target/attn/L35/q1/kv2                 17.474 mJ/call     0.511 ms   34.2 W  meter  +0.7%  N=3977   rsd 0.6%  
+  [ 574/760] target/attn/L35/q1/kv3                 18.099 mJ/call     0.534 ms   33.9 W  meter  +1.4%  N=3893   rsd 0.3%    anchor 0.90x
+  [ 575/760] target/attn/L35/q1/kv4                 18.304 mJ/call     0.541 ms   33.8 W  meter  +2.6%  N=3772   rsd 2.2%    anchor 0.97x
+  [ 576/760] target/attn/L35/q1/kv7                 18.178 mJ/call     0.528 ms   34.5 W  meter  +2.3%  N=3854   rsd 0.7%  
+  [ 577/760] target/attn/L35/q1/kv8                 18.324 mJ/call     0.530 ms   34.6 W  meter  +0.9%  N=3847   rsd 0.3%  
+  [ 578/760] target/attn/L35/q1/kv11                18.695 mJ/call     0.531 ms   35.2 W  meter  +1.0%  N=3915   rsd 0.8%  
+  [ 579/760] target/attn/L35/q1/kv12                18.720 mJ/call     0.532 ms   35.3 W  meter  +1.2%  N=3846   rsd 0.5%  
+  [ 580/760] target/attn/L35/q2/kv1                 23.127 mJ/call     0.641 ms   36.2 W  meter  +0.5%  N=3186   rsd 0.6%  
+  [ 581/760] target/attn/L35/q2/kv2                 24.604 mJ/call     0.634 ms   38.7 W  meter  +1.1%  N=3265   rsd 0.2%  
+  [ 582/760] target/attn/L35/q2/kv3                 25.325 mJ/call     0.627 ms   40.2 W  meter  +1.8%  N=3241   rsd 2.0%    anchor 1.39x !!
+  [ 583/760] target/attn/L35/q2/kv4                 26.113 mJ/call     0.628 ms   41.4 W  meter  +0.0%  N=3242   rsd 0.5%    anchor 1.46x !!
+  [ 584/760] target/attn/L35/q2/kv7                 29.837 mJ/call     0.633 ms   47.1 W  meter  +1.5%  N=3282   rsd 0.6%  
+  [ 585/760] target/attn/L35/q2/kv8                 30.947 mJ/call     0.640 ms   48.2 W  meter  +1.6%  N=3208   rsd 0.9%  
+  [ 586/760] target/attn/L35/q2/kv11                35.471 mJ/call     0.659 ms   53.8 W  meter  +5.0%  N=3124   rsd 0.5%  
+  [ 587/760] target/attn/L35/q2/kv12                36.133 mJ/call     0.657 ms   54.9 W  meter  +1.5%  N=3132   rsd 0.9%  
+  [ 588/760] target/attn/L35/q3/kv1                 24.264 mJ/call     0.638 ms   38.0 W  meter  +0.7%  N=3225   rsd 0.9%  
+  [ 589/760] target/attn/L35/q3/kv2                 25.563 mJ/call     0.636 ms   40.3 W  meter  +1.2%  N=3242   rsd 0.3%  
+  [ 590/760] target/attn/L35/q3/kv3                 26.450 mJ/call     0.653 ms   40.8 W  meter  +1.0%  N=3136   rsd 1.1%    anchor 1.92x !!
+  [ 591/760] target/attn/L35/q3/kv4                 27.339 mJ/call     0.642 ms   42.5 W  meter  -0.4%  N=3159   rsd 1.0%    anchor 1.79x !!
+  [ 592/760] target/attn/L35/q3/kv7                 30.867 mJ/call     0.636 ms   48.5 W  meter  +1.4%  N=3207   rsd 0.7%  
+  [ 593/760] target/attn/L35/q3/kv8                 31.715 mJ/call     0.646 ms   49.1 W  meter  +1.5%  N=3224   rsd 0.6%  
+  [ 594/760] target/attn/L35/q3/kv11                36.101 mJ/call     0.648 ms   55.7 W  meter  +2.3%  N=3179   rsd 0.7%  
+  [ 595/760] target/attn/L35/q3/kv12                36.943 mJ/call     0.645 ms   56.9 W  meter  +3.0%  N=3194   rsd 0.7%  
+  [ 596/760] target/attn/L35/q4/kv1                 24.343 mJ/call     0.620 ms   39.2 W  meter  +0.9%  N=3314   rsd 0.8%  
+  [ 597/760] target/attn/L35/q4/kv2                 26.112 mJ/call     0.641 ms   40.9 W  meter  +0.6%  N=3178   rsd 0.6%  
+  [ 598/760] target/attn/L35/q4/kv3                 27.805 mJ/call     0.678 ms   41.1 W  meter  +6.5%  N=3011   rsd 1.8%    anchor 1.77x !!
+  [ 599/760] target/attn/L35/q4/kv4                 28.529 mJ/call     0.675 ms   42.3 W  meter  +1.4%  N=3051   rsd 1.3%    anchor 1.68x !!
+  [ 600/760] target/attn/L35/q4/kv7                 31.306 mJ/call     0.634 ms   49.1 W  meter  +1.2%  N=3243   rsd 0.7%  
+  [ 601/760] target/attn/L35/q4/kv8                 32.917 mJ/call     0.665 ms   49.5 W  meter  +6.3%  N=3151   rsd 2.7%  
+  [ 602/760] target/attn/L35/q4/kv11                37.193 mJ/call     0.662 ms   55.4 W  meter  +1.6%  N=3082   rsd 1.3%  
+  [ 603/760] target/attn/L35/q4/kv12                38.015 mJ/call     0.672 ms   56.5 W  meter  +2.7%  N=3061   rsd 0.7%  
+  [ 604/760] target/attn/L35/q5/kv1                 25.287 mJ/call     0.647 ms   39.1 W  meter  +1.4%  N=3122   rsd 1.0%  
+  [ 605/760] target/attn/L35/q5/kv2                 26.682 mJ/call     0.655 ms   40.8 W  meter  -1.0%  N=3070   rsd 1.3%  
+  [ 606/760] target/attn/L35/q5/kv3                 27.022 mJ/call     0.639 ms   42.3 W  meter  +1.4%  N=3224   rsd 0.6%    anchor 1.62x !!
+  [ 607/760] target/attn/L35/q5/kv4                 28.086 mJ/call     0.642 ms   43.7 W  meter  +1.2%  N=3147   rsd 0.5%    anchor 1.57x !!
+  [ 608/760] target/attn/L35/q5/kv7                 31.803 mJ/call     0.646 ms   49.2 W  meter  +1.3%  N=3190   rsd 0.6%  
+  [ 609/760] target/attn/L35/q5/kv8                 32.502 mJ/call     0.642 ms   49.9 W  meter  +1.7%  N=3131   rsd 1.2%  
+  [ 610/760] target/attn/L35/q5/kv11                37.101 mJ/call     0.657 ms   56.5 W  meter  +2.2%  N=3190   rsd 0.5%  
+  [ 611/760] target/attn/L35/q5/kv12                38.526 mJ/call     0.681 ms   56.6 W  meter  +2.4%  N=3080   rsd 0.6%  
+  [ 612/760] target/attn/L35/q6/kv1                 24.950 mJ/call     0.633 ms   39.4 W  meter  +1.5%  N=3186   rsd 0.6%  
+  [ 613/760] target/attn/L35/q6/kv2                 26.170 mJ/call     0.636 ms   41.1 W  meter  +0.5%  N=3205   rsd 0.9%  
+  [ 614/760] target/attn/L35/q6/kv3                 27.376 mJ/call     0.647 ms   42.2 W  meter  +1.8%  N=3126   rsd 1.4%    anchor 1.63x !!
+  [ 615/760] target/attn/L35/q6/kv4                 28.097 mJ/call     0.641 ms   43.8 W  meter  +1.7%  N=3152   rsd 0.6%    anchor 1.54x !!
+  [ 616/760] target/attn/L35/q6/kv7                 31.923 mJ/call     0.652 ms   49.0 W  meter  +1.8%  N=3165   rsd 0.6%  
+  [ 617/760] target/attn/L35/q6/kv8                 32.472 mJ/call     0.644 ms   50.4 W  meter  +1.1%  N=3166   rsd 0.7%  
+  [ 618/760] target/attn/L35/q6/kv11                37.333 mJ/call     0.669 ms   55.8 W  meter  +3.2%  N=3094   rsd 0.8%  
+  [ 619/760] target/attn/L35/q6/kv12                38.371 mJ/call     0.684 ms   56.1 W  meter  +2.4%  N=3072   rsd 0.5%  
+  [ 620/760] target/attn/L35/q7/kv1                 25.197 mJ/call     0.629 ms   39.9 W  meter  -2.1%  N=3235   rsd 0.7%  
+  [ 621/760] target/attn/L35/q7/kv2                 26.906 mJ/call     0.652 ms   41.4 W  meter  +3.5%  N=3144   rsd 0.4%  
+  [ 622/760] target/attn/L35/q7/kv3                 27.883 mJ/call     0.651 ms   42.8 W  meter  +2.8%  N=3126   rsd 0.6%    anchor 1.66x !!
+  [ 623/760] target/attn/L35/q7/kv4                 28.435 mJ/call     0.638 ms   44.5 W  meter  -0.1%  N=3163   rsd 0.5%    anchor 1.55x !!
+  [ 624/760] target/attn/L35/q7/kv7                 32.035 mJ/call     0.641 ms   50.0 W  meter  +1.3%  N=3181   rsd 0.6%  
+  [ 625/760] target/attn/L35/q7/kv8                 32.735 mJ/call     0.642 ms   51.0 W  meter  +1.4%  N=3186   rsd 0.6%  
+  [ 626/760] target/attn/L35/q7/kv11                37.621 mJ/call     0.661 ms   56.9 W  meter  +2.4%  N=3116   rsd 0.7%  
+  [ 627/760] target/attn/L35/q7/kv12                38.696 mJ/call     0.678 ms   57.1 W  meter  +2.3%  N=3092   rsd 0.6%  
+  [ 628/760] target/attn/L35/q8/kv1                 25.913 mJ/call     0.650 ms   39.8 W  meter  +4.0%  N=3140   rsd 1.2%  
+  [ 629/760] target/attn/L35/q8/kv2                 27.077 mJ/call     0.644 ms   41.5 W  meter  +0.2%  N=3208   rsd 0.8%  
+  [ 630/760] target/attn/L35/q8/kv3                 28.045 mJ/call     0.650 ms   43.4 W  meter  +2.7%  N=3207   rsd 0.5%    anchor 1.57x !!
+  [ 631/760] target/attn/L35/q8/kv4                 28.490 mJ/call     0.635 ms   44.9 W  meter  -0.4%  N=3170   rsd 0.6%    anchor 1.47x !!
+  [ 632/760] target/attn/L35/q8/kv7                 32.196 mJ/call     0.636 ms   50.6 W  meter  +1.7%  N=3210   rsd 0.7%  
+  [ 633/760] target/attn/L35/q8/kv8                 32.755 mJ/call     0.635 ms   51.2 W  meter  +0.7%  N=3235   rsd 0.6%  
+  [ 634/760] target/attn/L35/q8/kv11                38.334 mJ/call     0.688 ms   55.7 W  meter  +2.2%  N=2968   rsd 0.8%  
+  [ 635/760] target/attn/L35/q8/kv12                39.784 mJ/call     0.703 ms   56.6 W  meter  +2.1%  N=2954   rsd 0.6%  
+  [ 636/760] target/attn/L35/q9/kv1                 25.411 mJ/call     0.639 ms   39.8 W  meter  +1.2%  N=3162   rsd 0.2%  
+  [ 637/760] target/attn/L35/q9/kv2                 26.413 mJ/call     0.631 ms   41.8 W  meter  +1.2%  N=3238   rsd 0.6%  
+  [ 638/760] target/attn/L35/q9/kv3                 27.236 mJ/call     0.632 ms   43.0 W  meter  +0.9%  N=3258   rsd 0.6%    anchor 1.58x !!
+  [ 639/760] target/attn/L35/q9/kv4                 28.140 mJ/call     0.643 ms   43.8 W  meter  +1.5%  N=3172   rsd 0.6%    anchor 1.54x !!
+  [ 640/760] target/attn/L35/q9/kv7                 32.402 mJ/call     0.655 ms   49.8 W  meter  +4.1%  N=3158   rsd 0.8%  
+  [ 641/760] target/attn/L35/q9/kv8                 32.537 mJ/call     0.644 ms   50.6 W  meter  -0.2%  N=3214   rsd 1.1%  
+  [ 642/760] target/attn/L35/q9/kv11                37.596 mJ/call     0.664 ms   56.6 W  meter  +2.3%  N=3127   rsd 0.7%  
+  [ 643/760] target/attn/L35/q9/kv12                38.464 mJ/call     0.685 ms   56.1 W  meter  +2.3%  N=3037   rsd 0.6%  
+  [ 644/760] target/mlp/L0/q1                       32.081 mJ/call     0.537 ms   59.8 W  meter  +3.1%  N=3875   rsd 0.4%    anchor 0.93x
+  [ 645/760] target/mlp/L0/q2                       46.245 mJ/call     0.769 ms   60.1 W  meter  +1.9%  N=2674   rsd 0.9%    anchor 0.92x
+  [ 646/760] target/mlp/L0/q3                       59.862 mJ/call     1.003 ms   59.6 W  meter  +1.3%  N=2033   rsd 0.5%    anchor 0.94x
+  [ 647/760] target/mlp/L0/q4                       67.798 mJ/call     1.136 ms   59.7 W  meter  +1.6%  N=1830   rsd 0.4%    anchor 0.94x
+  [ 648/760] target/mlp/L0/q5                       68.450 mJ/call     1.140 ms   60.0 W  meter  +1.5%  N=1803   rsd 0.9%    anchor 0.94x
+  [ 649/760] target/mlp/L0/q6                       68.308 mJ/call     1.144 ms   59.7 W  meter  +1.7%  N=1801   rsd 0.6%    anchor 0.94x
+  [ 650/760] target/mlp/L0/q7                       68.258 mJ/call     1.147 ms   59.5 W  meter  +1.7%  N=1779   rsd 0.7%    anchor 0.94x
+  [ 651/760] target/mlp/L0/q8                       68.619 mJ/call     1.150 ms   59.7 W  meter  +1.6%  N=1792   rsd 0.8%    anchor 0.94x
+  [ 652/760] target/mlp/L0/q9                       68.968 mJ/call     1.158 ms   59.6 W  meter  +1.6%  N=1763   rsd 0.6%    anchor 0.95x
+  [ 653/760] target/mlp/L18/q1                      31.939 mJ/call     0.536 ms   59.5 W  meter  +2.3%  N=3805   rsd 0.6%    anchor 0.93x
+  [ 654/760] target/mlp/L18/q2                      45.934 mJ/call     0.768 ms   59.8 W  meter  +1.9%  N=2682   rsd 0.6%    anchor 0.93x
+  [ 655/760] target/mlp/L18/q3                      59.756 mJ/call     1.003 ms   59.6 W  meter  +1.5%  N=2055   rsd 0.7%    anchor 1.03x
+  [ 656/760] target/mlp/L18/q4                      67.456 mJ/call     1.135 ms   59.5 W  meter  +1.5%  N=1801   rsd 0.6%    anchor 1.01x
+  [ 657/760] target/mlp/L18/q5                      68.022 mJ/call     1.140 ms   59.7 W  meter  +1.4%  N=1786   rsd 0.8%    anchor 1.01x
+  [ 658/760] target/mlp/L18/q6                      68.285 mJ/call     1.143 ms   59.7 W  meter  +1.9%  N=1815   rsd 0.4%    anchor 1.02x
+  [ 659/760] target/mlp/L18/q7                      68.072 mJ/call     1.147 ms   59.3 W  meter  +1.7%  N=1781   rsd 0.8%    anchor 1.02x
+  [ 660/760] target/mlp/L18/q8                      68.443 mJ/call     1.151 ms   59.5 W  meter  +1.6%  N=1790   rsd 0.8%    anchor 1.02x
+  [ 661/760] target/mlp/L18/q9                      68.931 mJ/call     1.159 ms   59.5 W  meter  +1.5%  N=1761   rsd 0.6%    anchor 1.02x
+  [ 662/760] target/mlp/L35/q1                      31.891 mJ/call     0.535 ms   59.6 W  meter  +2.5%  N=3849   rsd 0.6%    anchor 0.93x
+  [ 663/760] target/mlp/L35/q2                      45.725 mJ/call     0.767 ms   59.6 W  meter  +1.6%  N=2658   rsd 0.5%    anchor 0.92x
+  [ 664/760] target/mlp/L35/q3                      59.746 mJ/call     1.000 ms   59.7 W  meter  +1.5%  N=2079   rsd 0.6%    anchor 1.02x
+  [ 665/760] target/mlp/L35/q4                      67.539 mJ/call     1.131 ms   59.7 W  meter  +1.4%  N=1819   rsd 0.6%    anchor 1.01x
+
+wrote results/clear-qwen2.5-3b-nf4-cnndm.json: 665 measurements, 0 outside CLEAR's bar
+metering overhead vs unmetered timing: median +1.8%, range -4.4% .. +7.2%; one NVML read takes 3.78 ms
+stopped early -- deadline: next key would not finish (17 s each). Re-run the same command with --resume.
+additivity skipped: 'no measurement for target/embed'
+
+next:  python analyze.py <sweep.json> --clear results/clear-qwen2.5-3b-nf4-cnndm.json
+
+gate: results/clear-qwen2.5-3b-nf4-cnndm.json
+  roles measured:         draft, target
+  replays exact:          2770/2770
+  inside 10% bar:         665/665
+  metering overhead:      +1.8% median
+  part slower than whole: 0
+  anchor vs in-pass:      0.22 .. 2.71  (203/665 anchored, 63 off)
+  !! 18 component(s) under 0.2 ms are outside the anchor band, where an in-pass span is mostly launch gaps: draft/norm_in/L0/q1 0.54x (0.074 ms amplified vs 0.137 ms in the pass); draft/norm_in/L0/q2 0.56x (0.076 ms amplified vs 0.136 ms in the pass); draft/norm_in/L12/q1 0.58x (0.078 ms amplified vs 0.134 ms in the pass)
+
+  GATE FAILED -- do not compose from this file:
+    - amplified cost does not match what the component costs inside the real pass (outside 0.7 .. 1.4), so the replay is not running the kernel the pass runs: draft/prefill/prefill 0.54x (23.800 ms amplified vs 43.837 ms in the pass); draft/layer/L0/q1/kv3 0.66x (0.701 ms amplified vs 1.062 ms in the pass); draft/layer/L0/q1/kv4 0.62x (0.716 ms amplified vs 1.154 ms in the pass); draft/layer/L0/q2/kv3 0.66x (0.856 ms amplified vs 1.302 ms in the pass) (+59 more)
+    - additivity could not be computed: 'no measurement for target/embed'
